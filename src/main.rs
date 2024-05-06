@@ -5,10 +5,11 @@
 use std::{
     env, fs,
     io::{self, BufRead, Write},
+    mem::MaybeUninit,
 };
 
 use chunk::{Chunk2, OpCode};
-use vm::VM;
+use vm::{VM, VM2};
 
 mod chunk;
 mod compiler;
@@ -20,7 +21,15 @@ mod value;
 mod vm;
 
 fn main() {
-    let mut chunk = Chunk2::init();
+    #[allow(clippy::uninit_assumed_init)]
+    #[allow(invalid_value)]
+    let mut vm: VM2 = unsafe { MaybeUninit::uninit().assume_init() };
+    vm.init();
+
+    #[allow(clippy::uninit_assumed_init)]
+    #[allow(invalid_value)]
+    let mut chunk: Chunk2 = unsafe { MaybeUninit::uninit().assume_init() };
+    chunk.init();
     let constant = chunk.add_constant(1.2);
     chunk.write(OpCode::Constant as u8, 123);
     chunk.write(constant as u8, 123);
@@ -28,6 +37,8 @@ fn main() {
     chunk.write(OpCode::Return as u8, 123);
 
     chunk.disassemble("Test chunk");
+    let _ = vm.interpret(&mut chunk);
+    vm.free();
     chunk.free();
 
     // let mut vm = VM::new();

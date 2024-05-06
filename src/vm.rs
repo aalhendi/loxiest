@@ -6,13 +6,13 @@ use std::{
 };
 
 use crate::{
-    chunk::OpCode,
+    chunk::{Chunk2, OpCode},
     compiler::{Compiler, FunctionType},
     object::{
         native_clock, NativeFn, Obj, ObjBoundMethod, ObjClass, ObjClosure, ObjInstance, ObjNative,
         ObjUpvalue,
     },
-    value::Value,
+    value::{Value, Value2},
 };
 
 macro_rules! frame_mut {
@@ -22,7 +22,7 @@ macro_rules! frame_mut {
 }
 
 const FRAMES_MAX: usize = 64;
-const STACK_MAX: usize = FRAMES_MAX * (u8::MAX as usize + 1);
+const STACK_MAX: usize = 256;
 
 pub enum InterpretResult {
     CompileError,
@@ -649,5 +649,92 @@ impl VM {
         let frame = frame_mut!(self);
         let chunk = &frame.closure.function.chunk;
         &chunk.constants.values[idx]
+    }
+}
+
+pub struct VM2 {
+    chunk: *mut Chunk2,
+    ip: *mut u8,
+    stack: [Value2; STACK_MAX],
+    stack_top: *mut Value2,
+}
+
+impl VM2 {
+    fn reset_stack(&mut self) {
+        self.stack_top = self.stack.as_mut_ptr();
+    }
+
+    pub fn init(&mut self) {
+        self.reset_stack();
+    }
+    pub fn free(&mut self) {}
+
+    #[allow(non_snake_case)]
+    // TODO(aalhendi): is macro faster?
+    pub fn READ_BYTE(&mut self) -> u8 {
+        let byte = unsafe { *self.ip };
+        self.ip = unsafe { self.ip.offset(1) };
+        byte
+    }
+
+    #[allow(non_snake_case)]
+    pub fn READ_CONSTANT(&mut self) -> Value2 {
+        let constant_index = self.READ_BYTE() as usize;
+        unsafe { *(*self.chunk).constants.values.wrapping_add(constant_index) }
+    }
+
+    pub fn run(&mut self) -> Result<(), InterpretResult> {
+        loop {
+            #[cfg(feature = "debug-trace-execution")]
+            {
+                print!("          ");
+                let mut slot = self.stack.as_mut_ptr();
+                while slot < self.stack_top {
+                    let slot_val = unsafe { *slot };
+                    print!("[ {slot_val} ]");
+                    slot = slot.wrapping_add(1);
+                }
+                println!(); // newline
+                let offset = unsafe {
+                    let chunk_code_ptr = (*self.chunk).code;
+                    let ip_ptr = self.ip;
+                    ip_ptr.offset_from(chunk_code_ptr) as usize
+                };
+                unsafe {
+                    (*self.chunk).disassemble_instruction(offset);
+                }
+            }
+
+            let instruction = OpCode::from(self.READ_BYTE());
+            match instruction {
+                OpCode::Return => {
+                    unsafe { (*self.chunk).constants.print_value(self.pop(), Some('\n')) };
+                    return Ok(());
+                }
+                OpCode::Constant => {
+                    let constant = self.READ_CONSTANT();
+                    self.push(constant);
+                }
+                _ => todo!(),
+            }
+        }
+    }
+
+    pub fn interpret(&mut self, chunk: *mut Chunk2) -> Result<(), InterpretResult> {
+        self.chunk = chunk;
+        unsafe {
+            self.ip = (*self.chunk).code;
+        }
+        self.run()
+    }
+
+    fn push(&mut self, value: Value2) {
+        unsafe { *self.stack_top = value };
+        self.stack_top = self.stack_top.wrapping_add(1);
+    }
+
+    fn pop(&mut self) -> Value2 {
+        self.stack_top = self.stack_top.wrapping_sub(1);
+        unsafe { *self.stack_top }
     }
 }

@@ -1,3 +1,4 @@
+use std::mem::MaybeUninit;
 use std::{fmt::Display, mem, ptr::null_mut};
 
 use crate::memory::reallocate;
@@ -145,20 +146,21 @@ impl From<u8> for OpCode {
 pub struct Chunk2 {
     capacity: isize,
     count: isize,
-    code: *mut u8,
+    pub code: *mut u8,
     lines: *mut isize,
-    constants: ValueArray2,
+    pub constants: ValueArray2,
 }
 
 impl Chunk2 {
-    pub fn init() -> Self {
-        Self {
-            code: null_mut(),
-            lines: null_mut(),
-            capacity: 0,
-            count: 0,
-            constants: ValueArray2::init(),
-        }
+    #[allow(clippy::uninit_assumed_init)]
+    #[allow(invalid_value)]
+    pub fn init(&mut self) {
+        self.capacity = 0;
+        self.count = 0;
+        self.code = null_mut();
+        self.lines = null_mut();
+        self.constants = unsafe { MaybeUninit::uninit().assume_init() };
+        self.constants.init();
     }
 
     pub fn write(&mut self, byte: u8, line: isize) {
@@ -187,12 +189,8 @@ impl Chunk2 {
     pub fn free(&mut self) {
         FREE_ARRAY!(u8, self.code, self.capacity as usize);
         FREE_ARRAY!(isize, self.lines, self.capacity as usize);
-        // self.init()
         self.constants.free();
-        self.code = null_mut();
-        self.lines = null_mut();
-        self.capacity = 0;
-        self.count = 0;
+        self.init();
     }
 
     #[cfg(any(feature = "debug-trace-execution", feature = "debug-print-code"))]

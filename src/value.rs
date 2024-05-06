@@ -22,12 +22,10 @@ pub struct ValueArray2 {
 }
 
 impl ValueArray2 {
-    pub fn init() -> Self {
-        Self {
-            capacity: 0,
-            count: 0,
-            values: null_mut(),
-        }
+    pub fn init(&mut self) {
+        self.values = null_mut();
+        self.capacity = 0;
+        self.count = 0;
     }
 
     pub fn write(&mut self, value: Value2) {
@@ -48,10 +46,7 @@ impl ValueArray2 {
 
     pub fn free(&mut self) {
         FREE_ARRAY!(Value2, self.values, self.capacity as usize);
-        // self.init()
-        self.capacity = 0;
-        self.count = 0;
-        self.values = null_mut();
+        self.init();
     }
 
     #[cfg(any(feature = "debug-trace-execution", feature = "debug-print-code"))]
