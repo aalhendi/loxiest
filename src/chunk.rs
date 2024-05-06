@@ -143,9 +143,10 @@ impl From<u8> for OpCode {
 }
 
 pub struct Chunk2 {
-    code: *mut u8,
     capacity: isize,
     count: isize,
+    code: *mut u8,
+    lines: *mut isize,
     constants: ValueArray2,
 }
 
@@ -153,20 +154,28 @@ impl Chunk2 {
     pub fn init() -> Self {
         Self {
             code: null_mut(),
+            lines: null_mut(),
             capacity: 0,
             count: 0,
             constants: ValueArray2::init(),
         }
     }
 
-    pub fn write(&mut self, byte: u8) {
+    pub fn write(&mut self, byte: u8, line: isize) {
         if self.capacity < self.count + 1 {
             let old_capacity = self.capacity;
             self.capacity = GROW_CAPACITY!(old_capacity);
             self.code = GROW_ARRAY!(u8, self.code, old_capacity as usize, self.capacity as usize);
+            self.lines = GROW_ARRAY!(
+                isize,
+                self.lines,
+                old_capacity as usize,
+                self.capacity as usize
+            );
         }
 
         unsafe { *self.code.offset(self.count) = byte };
+        unsafe { *self.lines.offset(self.count) = line };
         self.count += 1;
     }
 
@@ -177,9 +186,11 @@ impl Chunk2 {
 
     pub fn free(&mut self) {
         FREE_ARRAY!(u8, self.code, self.capacity as usize);
+        FREE_ARRAY!(isize, self.lines, self.capacity as usize);
         // self.init()
         self.constants.free();
         self.code = null_mut();
+        self.lines = null_mut();
         self.capacity = 0;
         self.count = 0;
     }
@@ -198,11 +209,12 @@ impl Chunk2 {
     pub fn disassemble_instruction(&self, offset: usize) -> usize {
         print!("{offset:04} ");
 
-        // if offset > 0 && self.lines[offset] == self.lines[offset - 1] {
-        //     print!("   | ");
-        // } else {
-        //     print!("{line:4} ", line = self.lines[offset]);
-        // }
+        let line = unsafe { *self.lines.wrapping_add(offset) };
+        if offset > 0 && line == unsafe { *self.lines.wrapping_add(offset - 1) } {
+            print!("   | ");
+        } else {
+            print!("{line:4} ");
+        }
 
         let instruction = OpCode::from(unsafe { *self.code.wrapping_add(offset) });
         match instruction {
