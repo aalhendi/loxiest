@@ -1,6 +1,50 @@
-use std::fmt::Display;
+use std::{fmt::Display, mem, ptr::null_mut};
 
+use crate::memory::reallocate;
 use crate::value::{Value, ValueArray};
+
+// macros
+macro_rules! GROW_CAPACITY {
+    ($capacity:expr) => {
+        if $capacity < 8 {
+            8
+        } else {
+            $capacity * 2
+        }
+    };
+}
+
+/// Pass counts as usize
+macro_rules! GROW_ARRAY {
+    ($type:ty, $pointer:expr, $old_count:expr, $new_count:expr) => {{
+        let ptr = reallocate(
+            $pointer as *mut std::ffi::c_void,
+            $old_count * mem::size_of::<$type>(),
+            $new_count * mem::size_of::<$type>(),
+        ) as *mut $type;
+        // TODO(aalhendi): Is the zeroing needed?
+        /*
+        if $new_count > $old_count {
+            let new_slice =
+                std::slice::from_raw_parts_mut(ptr.add($old_count), $new_count - $old_count);
+            for elem in new_slice.iter_mut() {
+                *elem = mem::zeroed();
+            }
+        }
+        */
+        ptr
+    }};
+}
+
+macro_rules! FREE_ARRAY {
+    ($type:ty, $pointer:expr, $old_count:expr) => {
+        reallocate(
+            $pointer as *mut std::ffi::c_void,
+            $old_count * mem::size_of::<$type>(),
+            0,
+        ) as *mut $type;
+    };
+}
 
 #[derive(Debug)]
 #[repr(u8)]
@@ -137,6 +181,142 @@ impl From<u8> for OpCode {
             36 => OpCode::Method,
             _ => panic!("Unknown opcode {value}"),
         }
+    }
+}
+
+pub struct Chunk2 {
+    code: *mut u8,
+    capacity: isize,
+    count: isize,
+}
+
+impl Chunk2 {
+    pub fn init() -> Self {
+        Self {
+            code: null_mut(),
+            capacity: 0,
+            count: 0,
+        }
+    }
+
+    pub fn write(&mut self, byte: u8) {
+        if self.capacity < self.count + 1 {
+            let old_capacity = self.capacity;
+            self.capacity = GROW_CAPACITY!(old_capacity);
+            self.code = GROW_ARRAY!(u8, self.code, old_capacity as usize, self.capacity as usize);
+        }
+
+        unsafe { *self.code.offset(self.count) = byte };
+        self.count += 1;
+    }
+
+    pub fn free(&mut self) {
+        FREE_ARRAY!(u8, self.code, self.capacity as usize);
+        // self.init()
+        self.code = null_mut();
+        self.capacity = 0;
+        self.count = 0;
+    }
+
+    #[cfg(any(feature = "debug-trace-execution", feature = "debug-print-code"))]
+    pub fn disassemble<T: Display>(&self, name: T) {
+        println!("== {name} ==");
+
+        let mut offset = 0;
+        while offset < self.count as usize {
+            offset = self.disassemble_instruction(offset);
+        }
+    }
+
+    #[cfg(feature = "debug-print-code")]
+    pub fn disassemble_instruction(&self, offset: usize) -> usize {
+        print!("{offset:04} ");
+
+        // if offset > 0 && self.lines[offset] == self.lines[offset - 1] {
+        //     print!("   | ");
+        // } else {
+        //     print!("{line:4} ", line = self.lines[offset]);
+        // }
+
+        let instruction = OpCode::from(unsafe { *self.code.wrapping_add(offset) });
+        match instruction {
+            OpCode::Return
+            | OpCode::Negate
+            | OpCode::Add
+            | OpCode::Subtract
+            | OpCode::Multiply
+            | OpCode::Divide
+            | OpCode::False
+            | OpCode::True
+            | OpCode::Nil
+            | OpCode::Not
+            | OpCode::Equal
+            | OpCode::Greater
+            | OpCode::Less
+            | OpCode::Print
+            | OpCode::Pop
+            | OpCode::CloseUpvalue
+            | OpCode::Inherit => self.simple_instruction(instruction, offset),
+
+            OpCode::Constant
+            | OpCode::DefineGlobal
+            | OpCode::GetGlobal
+            | OpCode::SetGlobal
+            | OpCode::Class
+            | OpCode::GetProperty
+            | OpCode::SetProperty
+            | OpCode::Method
+            // | OpCode::GetSuper => self.constant_instruction(instruction, offset),
+            | OpCode::GetSuper => todo!(),
+
+            OpCode::GetLocal
+            | OpCode::SetLocal
+            | OpCode::Call
+            | OpCode::GetUpvalue
+            // | OpCode::SetUpvalue => self.byte_instruction(instruction, offset),
+            | OpCode::SetUpvalue => todo!(),
+
+            OpCode::Jump | OpCode::JumpIfFalse | OpCode::Loop => {
+                // let is_loop = matches!(instruction, OpCode::Loop);
+                // self.jump_instruction(instruction, is_loop, offset)
+            todo!()
+            }
+
+            // OpCode::Invoke | OpCode::SuperInvoke => self.invoke_instruction(instruction, offset),
+            OpCode::Invoke | OpCode::SuperInvoke => todo!(),
+
+            OpCode::Closure => todo!()
+            // OpCode::Closure => {
+            //     let mut idx = offset + 1;
+            //     let constant_idx = self.code[idx] as usize;
+            //     print!("{name:-16} {constant_idx:4} ", name = "OP_CLOSURE");
+            //     self.constants.print_value(constant_idx, None);
+
+            //     let c = self.constants.values[constant_idx].as_closure();
+            //     idx += 1;
+            //     for _ in 0..c.function.upvalue_count {
+            //         let is_local = if self.code[idx] == 0 {
+            //             "upvalue"
+            //         } else {
+            //             "local"
+            //         };
+            //         idx += 1;
+            //         let index = self.code[idx];
+            //         idx += 1;
+            //         println!(
+            //             "{:04}      |                     {is_local} {index}",
+            //             idx - 2
+            //         );
+            //     }
+            //     idx
+            // }
+        }
+    }
+
+    #[cfg(any(feature = "debug-trace-execution", feature = "debug-print-code"))]
+    fn simple_instruction(&self, code: OpCode, offset: usize) -> usize {
+        println!("{code}");
+        offset + 1
     }
 }
 
