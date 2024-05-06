@@ -1,50 +1,8 @@
 use std::{fmt::Display, mem, ptr::null_mut};
 
 use crate::memory::reallocate;
-use crate::value::{Value, ValueArray};
-
-// macros
-macro_rules! GROW_CAPACITY {
-    ($capacity:expr) => {
-        if $capacity < 8 {
-            8
-        } else {
-            $capacity * 2
-        }
-    };
-}
-
-/// Pass counts as usize
-macro_rules! GROW_ARRAY {
-    ($type:ty, $pointer:expr, $old_count:expr, $new_count:expr) => {{
-        let ptr = reallocate(
-            $pointer as *mut std::ffi::c_void,
-            $old_count * mem::size_of::<$type>(),
-            $new_count * mem::size_of::<$type>(),
-        ) as *mut $type;
-        // TODO(aalhendi): Is the zeroing needed?
-        /*
-        if $new_count > $old_count {
-            let new_slice =
-                std::slice::from_raw_parts_mut(ptr.add($old_count), $new_count - $old_count);
-            for elem in new_slice.iter_mut() {
-                *elem = mem::zeroed();
-            }
-        }
-        */
-        ptr
-    }};
-}
-
-macro_rules! FREE_ARRAY {
-    ($type:ty, $pointer:expr, $old_count:expr) => {
-        reallocate(
-            $pointer as *mut std::ffi::c_void,
-            $old_count * mem::size_of::<$type>(),
-            0,
-        ) as *mut $type;
-    };
-}
+use crate::value::{Value, Value2, ValueArray, ValueArray2};
+use crate::{FREE_ARRAY, GROW_ARRAY, GROW_CAPACITY};
 
 #[derive(Debug)]
 #[repr(u8)]
@@ -188,6 +146,7 @@ pub struct Chunk2 {
     code: *mut u8,
     capacity: isize,
     count: isize,
+    constants: ValueArray2,
 }
 
 impl Chunk2 {
@@ -196,6 +155,7 @@ impl Chunk2 {
             code: null_mut(),
             capacity: 0,
             count: 0,
+            constants: ValueArray2::init(),
         }
     }
 
@@ -210,9 +170,15 @@ impl Chunk2 {
         self.count += 1;
     }
 
+    pub fn add_constant(&mut self, value: Value2) -> isize {
+        self.constants.write(value);
+        self.constants.count - 1
+    }
+
     pub fn free(&mut self) {
         FREE_ARRAY!(u8, self.code, self.capacity as usize);
         // self.init()
+        self.constants.free();
         self.code = null_mut();
         self.capacity = 0;
         self.count = 0;
@@ -266,8 +232,7 @@ impl Chunk2 {
             | OpCode::GetProperty
             | OpCode::SetProperty
             | OpCode::Method
-            // | OpCode::GetSuper => self.constant_instruction(instruction, offset),
-            | OpCode::GetSuper => todo!(),
+            | OpCode::GetSuper => self.constant_instruction(instruction, offset),
 
             OpCode::GetLocal
             | OpCode::SetLocal
@@ -317,6 +282,17 @@ impl Chunk2 {
     fn simple_instruction(&self, code: OpCode, offset: usize) -> usize {
         println!("{code}");
         offset + 1
+    }
+
+    #[cfg(any(feature = "debug-trace-execution", feature = "debug-print-code"))]
+    fn constant_instruction(&self, code: OpCode, offset: usize) -> usize {
+        // TODO(aalhendi): check type
+        let constant_idx = unsafe { *self.code.wrapping_add(offset + 1) } as usize;
+        let name = code.to_string(); // This makes formatting work for some reason
+        print!("{name:-16} {constant_idx:4} '");
+        let value = unsafe { *self.constants.values.wrapping_add(constant_idx) };
+        self.constants.print_value(value, Some('\''));
+        offset + 2
     }
 }
 

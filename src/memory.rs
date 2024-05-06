@@ -25,3 +25,49 @@ pub fn reallocate(
         new_ptr as *mut std::ffi::c_void
     }
 }
+
+// macros
+#[macro_export]
+macro_rules! GROW_CAPACITY {
+    ($capacity:expr) => {
+        if $capacity < 8 {
+            8
+        } else {
+            $capacity * 2
+        }
+    };
+}
+
+/// Pass counts as usize
+#[macro_export]
+macro_rules! GROW_ARRAY {
+    ($type:ty, $pointer:expr, $old_count:expr, $new_count:expr) => {{
+        let ptr = reallocate(
+            $pointer as *mut std::ffi::c_void,
+            $old_count * mem::size_of::<$type>(),
+            $new_count * mem::size_of::<$type>(),
+        ) as *mut $type;
+        // TODO(aalhendi): Is the zeroing needed?
+        /*
+        if $new_count > $old_count {
+            let new_slice =
+                std::slice::from_raw_parts_mut(ptr.add($old_count), $new_count - $old_count);
+            for elem in new_slice.iter_mut() {
+                *elem = mem::zeroed();
+            }
+        }
+        */
+        ptr
+    }};
+}
+
+#[macro_export]
+macro_rules! FREE_ARRAY {
+    ($type:ty, $pointer:expr, $old_count:expr) => {
+        reallocate(
+            $pointer as *mut std::ffi::c_void,
+            $old_count * mem::size_of::<$type>(),
+            0,
+        ) as *mut $type;
+    };
+}

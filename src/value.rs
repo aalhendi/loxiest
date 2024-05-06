@@ -1,11 +1,68 @@
 use std::{
     cell::RefCell,
     fmt::Display,
+    mem,
     ops::{Deref, Neg},
+    ptr::null_mut,
     rc::Rc,
 };
 
-use crate::object::{Obj, ObjClass, ObjClosure, ObjInstance};
+use crate::{memory::reallocate, FREE_ARRAY};
+use crate::{
+    object::{Obj, ObjClass, ObjClosure, ObjInstance},
+    GROW_ARRAY, GROW_CAPACITY,
+};
+
+pub type Value2 = f64;
+
+pub struct ValueArray2 {
+    pub capacity: isize,
+    pub count: isize,
+    pub values: *mut Value2,
+}
+
+impl ValueArray2 {
+    pub fn init() -> Self {
+        Self {
+            capacity: 0,
+            count: 0,
+            values: null_mut(),
+        }
+    }
+
+    pub fn write(&mut self, value: Value2) {
+        if self.capacity < self.count + 1 {
+            let old_capacity = self.capacity;
+            self.capacity = GROW_CAPACITY!(old_capacity);
+            self.values = GROW_ARRAY!(
+                Value2,
+                self.values,
+                old_capacity as usize,
+                self.capacity as usize
+            );
+        }
+
+        unsafe { *self.values.offset(self.count) = value };
+        self.count += 1;
+    }
+
+    pub fn free(&mut self) {
+        FREE_ARRAY!(Value2, self.values, self.capacity as usize);
+        // self.init()
+        self.capacity = 0;
+        self.count = 0;
+        self.values = null_mut();
+    }
+
+    #[cfg(any(feature = "debug-trace-execution", feature = "debug-print-code"))]
+    pub fn print_value(&self, value: Value2, terminator: Option<char>) {
+        if let Some(t) = terminator {
+            println!("{value}{t}")
+        } else {
+            println!("{value}")
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub enum Value {

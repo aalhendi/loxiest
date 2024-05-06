@@ -21,6 +21,10 @@ mod vm;
 
 fn main() {
     let mut chunk = Chunk2::init();
+    let constant = chunk.add_constant(1.2);
+    chunk.write(OpCode::Constant as u8);
+    chunk.write(constant as u8);
+
     chunk.write(OpCode::Return as u8);
 
     chunk.disassemble("Test chunk");
