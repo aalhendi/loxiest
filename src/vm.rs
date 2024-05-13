@@ -21,6 +21,14 @@ macro_rules! frame_mut {
     };
 }
 
+macro_rules! binary_op {
+    ($vm:expr, $op:tt) => {{
+        let b = $vm.pop();
+        let a = $vm.pop();
+        $vm.push(a $op b);
+    }};
+}
+
 const FRAMES_MAX: usize = 64;
 const STACK_MAX: usize = 256;
 
@@ -715,6 +723,14 @@ impl VM2 {
                     let constant = self.READ_CONSTANT();
                     self.push(constant);
                 }
+                OpCode::Negate => {
+                    let v = self.pop();
+                    self.push(-v);
+                }
+                OpCode::Add => binary_op!(self, +),
+                OpCode::Subtract => binary_op!(self, -),
+                OpCode::Multiply => binary_op!(self, *),
+                OpCode::Divide => binary_op!(self, /),
                 _ => todo!(),
             }
         }
