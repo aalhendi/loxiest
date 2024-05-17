@@ -13,7 +13,99 @@ use crate::{
     GROW_ARRAY, GROW_CAPACITY,
 };
 
-pub type Value2 = f64;
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum ValueType {
+    Bool,
+    Nil,
+    Number,
+}
+
+#[derive(Clone, Copy)]
+union ValueUnion {
+    boolean: bool,
+    number: f64,
+}
+
+#[derive(Clone, Copy)]
+pub struct Value2 {
+    type_: ValueType,
+    as_: ValueUnion,
+}
+
+impl Display for Value2 {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.type_ {
+            ValueType::Bool => write!(f, "{}", self.as_bool()),
+            ValueType::Nil => write!(f, "Nil"),
+            ValueType::Number => write!(f, "{}", self.as_number()),
+        }
+    }
+}
+
+impl Value2 {
+    pub const fn bool_val(value: bool) -> Self {
+        Self {
+            type_: ValueType::Bool,
+            as_: ValueUnion { boolean: value },
+        }
+    }
+
+    pub const fn nil_val() -> Self {
+        Self {
+            type_: ValueType::Nil,
+            as_: ValueUnion { number: 0.0 },
+        }
+    }
+
+    pub const fn number_val(value: f64) -> Self {
+        Self {
+            type_: ValueType::Number,
+            as_: ValueUnion { number: value },
+        }
+    }
+
+    // PERF(aalhendi): does match/panic really add overhead? I didnt bother finding out...
+    pub fn as_bool(&self) -> bool {
+        // match self.type_ {
+        //     ValueType::Bool => self.as_.boolean,
+        //     _ => panic!("Value is not a boolean"),
+        // }
+        unsafe { self.as_.boolean }
+    }
+
+    pub fn as_number(&self) -> f64 {
+        unsafe { self.as_.number }
+    }
+
+    pub fn is_bool(&self) -> bool {
+        self.type_ == ValueType::Bool
+    }
+
+    pub fn is_nil(&self) -> bool {
+        self.type_ == ValueType::Nil
+    }
+
+    pub fn is_number(&self) -> bool {
+        self.type_ == ValueType::Number
+    }
+
+    // NOTE(aalhendi): Lox follows ruby in that only false and nil are false in lox
+    pub fn is_falsey(&self) -> bool {
+        self.is_nil() || (self.is_bool() && !self.as_bool())
+    }
+
+    // TODO(aalhendi): probably revise this
+    pub fn equal(a: Value2, b: Value2) -> bool {
+        if a.type_ != b.type_ {
+            return false;
+        }
+        match a.type_ {
+            ValueType::Bool => a.as_bool() == b.as_bool(),
+            ValueType::Nil => true,
+            ValueType::Number => a.as_number() == b.as_number(),
+        }
+    }
+}
 
 pub struct ValueArray2 {
     pub capacity: isize,

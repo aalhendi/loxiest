@@ -24,10 +24,15 @@ macro_rules! frame_mut {
 }
 
 macro_rules! binary_op {
-    ($vm:expr, $op:tt) => {{
-        let b = $vm.pop();
-        let a = $vm.pop();
-        $vm.push(a $op b);
+    ($vm:expr, $value_type:expr, $op:tt) => {{
+        if !$crate::value::Value2::is_number(&$vm.peek(0)) || !$crate::value::Value2::is_number(&$vm.peek(1)) {
+            $vm.runtime_error("Operands must be numbers.");
+            return Err($crate::vm::InterpretResult::RuntimeError);
+        }
+        let b = $crate::value::Value2::as_number(&$vm.pop());
+        let a = $crate::value::Value2::as_number(&$vm.pop());
+        let result = $value_type(a $op b);
+        $vm.push(result);
     }};
 }
 
@@ -680,7 +685,7 @@ impl VM2 {
     pub fn free(&mut self) {}
 
     #[allow(non_snake_case)]
-    // TODO(aalhendi): is macro faster?
+    // PERF(aalhendi): is macro faster?
     pub fn READ_BYTE(&mut self) -> u8 {
         let byte = unsafe { *self.ip };
         self.ip = unsafe { self.ip.offset(1) };
@@ -726,13 +731,31 @@ impl VM2 {
                     self.push(constant);
                 }
                 OpCode::Negate => {
-                    let v = self.pop();
-                    self.push(-v);
+                    if !self.peek(0).is_number() {
+                        self.runtime_error("Operand must be number.");
+                        return Err(InterpretResult::RuntimeError);
+                    }
+                    let v = Value2::number_val(-self.pop().as_number());
+                    self.push(v);
                 }
-                OpCode::Add => binary_op!(self, +),
-                OpCode::Subtract => binary_op!(self, -),
-                OpCode::Multiply => binary_op!(self, *),
-                OpCode::Divide => binary_op!(self, /),
+                OpCode::Nil => self.push(Value2::nil_val()),
+                OpCode::True => self.push(Value2::bool_val(true)),
+                OpCode::False => self.push(Value2::bool_val(false)),
+                OpCode::Equal => {
+                    let b = self.pop();
+                    let a = self.pop();
+                    self.push(Value2::bool_val(Value2::equal(a, b)));
+                }
+                OpCode::Greater => binary_op!(self, Value2::bool_val, >),
+                OpCode::Less => binary_op!(self, Value2::bool_val, <),
+                OpCode::Add => binary_op!(self, Value2::number_val, +),
+                OpCode::Subtract => binary_op!(self, Value2::number_val, -),
+                OpCode::Multiply => binary_op!(self, Value2::number_val, *),
+                OpCode::Divide => binary_op!(self, Value2::number_val, /),
+                OpCode::Not => {
+                    let v = Value2::bool_val(self.pop().is_falsey());
+                    self.push(v)
+                }
                 _ => todo!(),
             }
         }
@@ -758,6 +781,15 @@ impl VM2 {
         result
     }
 
+    fn runtime_error(&mut self, message: &str) {
+        // let instruction = unsafe { (*self.ip) - (*self.chunk).code - 1 };
+        let instruction = unsafe { self.ip as usize - (*self.chunk).code as usize - 1 };
+        let line = unsafe { *((*self.chunk).lines.wrapping_add(instruction)) };
+        eprintln!("{message}");
+        eprintln!("[line {line}] in script");
+        self.reset_stack();
+    }
+
     fn push(&mut self, value: Value2) {
         unsafe { *self.stack_top = value };
         self.stack_top = self.stack_top.wrapping_add(1);
@@ -766,5 +798,9 @@ impl VM2 {
     fn pop(&mut self) -> Value2 {
         self.stack_top = self.stack_top.wrapping_sub(1);
         unsafe { *self.stack_top }
+    }
+
+    fn peek(&self, distance: isize) -> Value2 {
+        unsafe { *self.stack_top.offset(-1 - distance) }
     }
 }

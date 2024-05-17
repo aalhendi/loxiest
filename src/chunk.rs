@@ -147,7 +147,7 @@ pub struct Chunk2 {
     capacity: isize,
     count: isize,
     pub code: *mut u8,
-    lines: *mut isize,
+    pub lines: *mut isize,
     pub constants: ValueArray2,
 }
 
