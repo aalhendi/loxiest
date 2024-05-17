@@ -1,6 +1,7 @@
 use std::{
     cell::RefCell,
     collections::{hash_map::Entry, HashMap},
+    mem::MaybeUninit,
     ops::Deref,
     rc::Rc,
 };
@@ -8,6 +9,7 @@ use std::{
 use crate::{
     chunk::{Chunk2, OpCode},
     compiler::{Compiler, FunctionType},
+    compiler2::Compiler2,
     object::{
         native_clock, NativeFn, Obj, ObjBoundMethod, ObjClass, ObjClosure, ObjInstance, ObjNative,
         ObjUpvalue,
@@ -736,12 +738,24 @@ impl VM2 {
         }
     }
 
-    pub fn interpret(&mut self, chunk: *mut Chunk2) -> Result<(), InterpretResult> {
-        self.chunk = chunk;
-        unsafe {
-            self.ip = (*self.chunk).code;
+    pub fn interpret(&mut self, source: &str) -> Result<(), InterpretResult> {
+        #[allow(clippy::uninit_assumed_init)]
+        #[allow(invalid_value)]
+        let mut chunk: Chunk2 = unsafe { MaybeUninit::uninit().assume_init() };
+        chunk.init();
+
+        let mut compiler = Compiler2::new(source, &mut chunk);
+        if !compiler.compile() {
+            chunk.free();
+            return Err(InterpretResult::CompileError);
         }
-        self.run()
+
+        self.chunk = &mut chunk;
+        self.ip = unsafe { (*self.chunk).code };
+
+        let result = self.run();
+        chunk.free();
+        result
     }
 
     fn push(&mut self, value: Value2) {
