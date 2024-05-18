@@ -1,4 +1,12 @@
-use std::alloc::{dealloc, realloc, Layout};
+use std::{
+    alloc::{dealloc, realloc, Layout},
+    ptr::null_mut,
+};
+
+use crate::{
+    object2::{Obj2, ObjString, ObjType},
+    VM,
+};
 
 pub fn reallocate(
     pointer: *mut std::ffi::c_void,
@@ -66,8 +74,52 @@ macro_rules! FREE_ARRAY {
     ($type:ty, $pointer:expr, $old_count:expr) => {
         reallocate(
             $pointer as *mut std::ffi::c_void,
-            $old_count * mem::size_of::<$type>(),
+            $old_count * std::mem::size_of::<$type>(),
             0,
         ) as *mut $type;
     };
+}
+
+#[macro_export]
+macro_rules! ALLOCATE {
+    ($type:ty, $count:expr) => {
+        reallocate(
+            std::ptr::null_mut(),
+            0,
+            std::mem::size_of::<$type>() * $count,
+        ) as *mut $type
+    };
+}
+
+macro_rules! FREE {
+    ($type:ty, $ptr:expr) => {
+        reallocate(
+            $ptr as *mut std::ffi::c_void,
+            std::mem::size_of::<$type>(),
+            0,
+        )
+    };
+}
+
+fn free_object(object: *mut Obj2) {
+    unsafe {
+        match (*object).type_ {
+            ObjType::String => {
+                let string = object as *mut ObjString;
+                FREE_ARRAY!(char, (*string).chars, (*string).length as usize + 1);
+                FREE!(ObjString, object);
+            }
+        }
+    }
+}
+
+pub fn free_objects() {
+    unsafe {
+        let mut object = VM.objects;
+        while !object.is_null() {
+            let next = (*object).next;
+            free_object(object);
+            object = next;
+        }
+    }
 }

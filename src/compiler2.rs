@@ -1,5 +1,6 @@
 use crate::{
     chunk::{Chunk, Chunk2, OpCode},
+    object2::Obj2,
     scanner::Scanner,
     token::{Token, TokenType},
     value::{Value, Value2},
@@ -9,15 +10,15 @@ use crate::{
 #[repr(u8)]
 enum Precedence {
     None,
-    Assignment,  // =
-    _Or,         // or
-    _And,        // and
+    Assignment, // =
+    _Or,        // or
+    _And,       // and
     Equality,   // == !=
     Comparison, // < > <= >=
-    Term,        // + -
-    Factor,      // * /
-    Unary,       // ! -
-    _Call,       // . ()
+    Term,       // + -
+    Factor,     // * /
+    Unary,      // ! -
+    _Call,      // . ()
     Primary,
 }
 
@@ -148,6 +149,14 @@ impl<'a> Compiler2<'a> {
         }
     }
 
+    fn string(&mut self) {
+        let chars = self.parser.previous.lexeme.as_bytes();
+        self.emit_constant(Value2::obj_val(Obj2::copy_string(
+            &chars[1..chars.len() - 1],
+            self.parser.previous.lexeme.len() - 2,
+        )))
+    }
+
     // NOTE(aalhendi): According to IEEE 754, all comparison operators return false when an operand is NaN./
     // That means NaN <= 1 is false and NaN > 1 is also false.
     // But our desugaring assumes the latter is always the negation of the former.
@@ -230,7 +239,7 @@ impl<'a> Compiler2<'a> {
             Less => ParseRule::new(None, Some(|c| c.binary()), Precedence::Comparison),
             LessEqual => ParseRule::new(None, Some(|c| c.binary()), Precedence::Comparison),
             Identifier => ParseRule::new(None, None, Precedence::None),
-            String => ParseRule::new(None, None, Precedence::None),
+            String => ParseRule::new(Some(|c| c.string()), None, Precedence::None),
             Number => ParseRule::new(Some(|c| c.number()), None, Precedence::None),
             And => ParseRule::new(None, None, Precedence::None),
             Class => ParseRule::new(None, None, Precedence::None),

@@ -1,0 +1,3 @@
+# TODO
+
+- Rework strings.

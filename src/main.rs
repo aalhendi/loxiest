@@ -16,30 +16,35 @@ mod compiler;
 mod compiler2;
 mod memory;
 mod object;
+mod object2;
 mod scanner;
 mod token;
 mod value;
 mod vm;
 
+#[allow(clippy::uninit_assumed_init)]
+#[allow(invalid_value)]
+// NOTE(aalhendi): Cant use MaybeUninit::uninit().assume_init() because static variables
+// must be initialized with a constant value or an expression that can be evaluated at compile-time.
+pub static mut VM: VM2 = unsafe { std::mem::zeroed() };
 fn main() {
-    #[allow(clippy::uninit_assumed_init)]
-    #[allow(invalid_value)]
-    let mut vm: VM2 = unsafe { MaybeUninit::uninit().assume_init() };
-    vm.init();
+    unsafe {
+        VM.init();
 
-    let args: Vec<String> = env::args().collect();
+        let args: Vec<String> = env::args().collect();
 
-    match args.len() {
-        1 => repl(&mut vm),
-        2 => run_file(&mut vm, &args[1]).expect("Unable to run file."),
-        _ => {
-            println!("Usage: clox [path]");
-            // EX_USAGE (64) Command was used incorrectly, e.g., with the wrong number of arguments, a bad flag, bad syntax in a parameter, or whatever.
-            std::process::exit(64)
+        match args.len() {
+            1 => repl(&mut VM),
+            2 => run_file(&mut VM, &args[1]).expect("Unable to run file."),
+            _ => {
+                println!("Usage: clox [path]");
+                // EX_USAGE (64) Command was used incorrectly, e.g., with the wrong number of arguments, a bad flag, bad syntax in a parameter, or whatever.
+                std::process::exit(64)
+            }
         }
-    }
 
-    vm.free();
+        VM.free();
+    }
 }
 
 fn run_file(vm: &mut VM2, file_path: &str) -> io::Result<()> {

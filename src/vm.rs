@@ -10,11 +10,14 @@ use crate::{
     chunk::{Chunk2, OpCode},
     compiler::{Compiler, FunctionType},
     compiler2::Compiler2,
+    memory::{free_objects, reallocate},
     object::{
         native_clock, NativeFn, Obj, ObjBoundMethod, ObjClass, ObjClosure, ObjInstance, ObjNative,
         ObjUpvalue,
     },
+    object2::{Obj2, ObjString, ObjType},
     value::{Value, Value2},
+    ALLOCATE,
 };
 
 macro_rules! frame_mut {
@@ -672,6 +675,7 @@ pub struct VM2 {
     ip: *mut u8,
     stack: [Value2; STACK_MAX],
     stack_top: *mut Value2,
+    pub objects: *mut Obj2, // Intrusive linked list head
 }
 
 impl VM2 {
@@ -681,8 +685,12 @@ impl VM2 {
 
     pub fn init(&mut self) {
         self.reset_stack();
+        self.objects = std::ptr::null_mut();
     }
-    pub fn free(&mut self) {}
+
+    pub fn free(&mut self) {
+        free_objects();
+    }
 
     #[allow(non_snake_case)]
     // PERF(aalhendi): is macro faster?
@@ -748,7 +756,19 @@ impl VM2 {
                 }
                 OpCode::Greater => binary_op!(self, Value2::bool_val, >),
                 OpCode::Less => binary_op!(self, Value2::bool_val, <),
-                OpCode::Add => binary_op!(self, Value2::number_val, +),
+                OpCode::Add => {
+                    if self.peek(0).is_string() && self.peek(1).is_string() {
+                        self.concatenate();
+                    } else if self.peek(0).is_number() && self.peek(1).is_number() {
+                        let b = self.pop().as_number();
+                        let a = self.pop().as_number();
+                        let v = Value2::number_val(a + b);
+                        self.push(v);
+                    } else {
+                        self.runtime_error("Operands must be two numbers or two strings.");
+                        return Err(InterpretResult::RuntimeError);
+                    }
+                }
                 OpCode::Subtract => binary_op!(self, Value2::number_val, -),
                 OpCode::Multiply => binary_op!(self, Value2::number_val, *),
                 OpCode::Divide => binary_op!(self, Value2::number_val, /),
@@ -779,6 +799,29 @@ impl VM2 {
         let result = self.run();
         chunk.free();
         result
+    }
+
+    fn concatenate(&mut self) {
+        let b = self.pop().as_string();
+        let a = self.pop().as_string();
+
+        let length = unsafe { (*a).length + (*b).length };
+        let chars = ALLOCATE!(char, length as usize + 1);
+        // PERF(aalhendi): ghetto memcpy, not sure about perf
+        unsafe {
+            for idx in 0..(*a).length {
+                (*chars.offset(idx)) = *(*a).chars.offset(idx);
+            }
+
+            for idx in 0..(*b).length {
+                (*chars.offset((*a).length + idx)) = *(*b).chars.offset(idx);
+            }
+
+            (*chars.offset(length)) = '\0';
+        }
+
+        let result = ObjString::take_string(chars, length as usize);
+        self.push(Value2::obj_val(result));
     }
 
     fn runtime_error(&mut self, message: &str) {

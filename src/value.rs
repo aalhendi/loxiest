@@ -7,7 +7,11 @@ use std::{
     rc::Rc,
 };
 
-use crate::{memory::reallocate, FREE_ARRAY};
+use crate::{
+    memory::reallocate,
+    object2::{Obj2, ObjString, ObjType},
+    FREE_ARRAY,
+};
 use crate::{
     object::{Obj, ObjClass, ObjClosure, ObjInstance},
     GROW_ARRAY, GROW_CAPACITY,
@@ -18,12 +22,14 @@ enum ValueType {
     Bool,
     Nil,
     Number,
+    Obj,
 }
 
 #[derive(Clone, Copy)]
 union ValueUnion {
     boolean: bool,
     number: f64,
+    obj: *mut Obj2,
 }
 
 #[derive(Clone, Copy)]
@@ -38,6 +44,19 @@ impl Display for Value2 {
             ValueType::Bool => write!(f, "{}", self.as_bool()),
             ValueType::Nil => write!(f, "Nil"),
             ValueType::Number => write!(f, "{}", self.as_number()),
+            ValueType::Obj => match self.obj_type() {
+                ObjType::String => unsafe {
+                    let str_ptr = self.as_cstring();
+                    let mut i = 0;
+                    loop {
+                        if (*str_ptr.offset(i)) == '\0' {
+                            break Ok(());
+                        }
+                        write!(f, "{}", (*str_ptr.offset(i)))?;
+                        i += 1;
+                    }
+                },
+            },
         }
     }
 }
@@ -64,6 +83,15 @@ impl Value2 {
         }
     }
 
+    pub const fn obj_val<T>(object: *mut T) -> Self {
+        Self {
+            type_: ValueType::Obj,
+            as_: ValueUnion {
+                obj: object as *mut Obj2,
+            },
+        }
+    }
+
     // PERF(aalhendi): does match/panic really add overhead? I didnt bother finding out...
     pub fn as_bool(&self) -> bool {
         // match self.type_ {
@@ -77,6 +105,23 @@ impl Value2 {
         unsafe { self.as_.number }
     }
 
+    pub fn as_obj(&self) -> *mut Obj2 {
+        unsafe { self.as_.obj }
+    }
+
+    pub fn as_string(&self) -> *mut ObjString {
+        debug_assert!(self.type_ == ValueType::Obj);
+        unsafe {
+            debug_assert!((*self.as_obj()).obj_type() == ObjType::String);
+            std::mem::transmute(self.as_obj())
+        }
+    }
+
+    // TODO(aalhendi): rename to as_native_string?
+    pub fn as_cstring(&self) -> *mut char {
+        unsafe { (*self.as_string()).chars }
+    }
+
     pub fn is_bool(&self) -> bool {
         self.type_ == ValueType::Bool
     }
@@ -87,6 +132,23 @@ impl Value2 {
 
     pub fn is_number(&self) -> bool {
         self.type_ == ValueType::Number
+    }
+
+    pub fn is_obj(&self) -> bool {
+        self.type_ == ValueType::Obj
+    }
+
+    pub fn is_string(&self) -> bool {
+        self.is_obj_type(ObjType::String)
+    }
+
+    pub fn obj_type(&self) -> ObjType {
+        debug_assert!(self.type_ == ValueType::Obj);
+        unsafe { (*self.as_obj()).obj_type() }
+    }
+
+    pub fn is_obj_type(&self, type_: ObjType) -> bool {
+        self.is_obj() && unsafe { (*self.as_obj()).type_ == type_ }
     }
 
     // NOTE(aalhendi): Lox follows ruby in that only false and nil are false in lox
@@ -103,6 +165,23 @@ impl Value2 {
             ValueType::Bool => a.as_bool() == b.as_bool(),
             ValueType::Nil => true,
             ValueType::Number => a.as_number() == b.as_number(),
+            ValueType::Obj => {
+                let a_string = a.as_string();
+                let b_string = b.as_string();
+                unsafe {
+                    // PERF(aalhendi): ghetto memcmp, not sure about perf
+                    let length = (*a_string).length;
+                    if length != (*b_string).length {
+                        return false;
+                    }
+                    for c in 0..length {
+                        if (*(*a_string).chars.offset(c)) != (*(*b_string).chars.offset(c)) {
+                            return false;
+                        }
+                    }
+                    true
+                }
+            }
         }
     }
 }
