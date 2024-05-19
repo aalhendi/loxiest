@@ -16,6 +16,7 @@ use crate::{
         ObjUpvalue,
     },
     object2::{Obj2, ObjString, ObjType},
+    table::Table,
     value::{Value, Value2},
     ALLOCATE,
 };
@@ -675,6 +676,7 @@ pub struct VM2 {
     ip: *mut u8,
     stack: [Value2; STACK_MAX],
     stack_top: *mut Value2,
+    pub strings: Table,
     pub objects: *mut Obj2, // Intrusive linked list head
 }
 
@@ -686,9 +688,11 @@ impl VM2 {
     pub fn init(&mut self) {
         self.reset_stack();
         self.objects = std::ptr::null_mut();
+        self.strings.init();
     }
 
     pub fn free(&mut self) {
+        self.strings.free();
         free_objects();
     }
 
@@ -806,7 +810,7 @@ impl VM2 {
         let a = self.pop().as_string();
 
         let length = unsafe { (*a).length + (*b).length };
-        let chars = ALLOCATE!(char, length as usize + 1);
+        let chars = ALLOCATE!(u8, length as usize + 1);
         // PERF(aalhendi): ghetto memcpy, not sure about perf
         unsafe {
             for idx in 0..(*a).length {
@@ -817,7 +821,7 @@ impl VM2 {
                 (*chars.offset((*a).length + idx)) = *(*b).chars.offset(idx);
             }
 
-            (*chars.offset(length)) = '\0';
+            (*chars.offset(length)) = b'\0';
         }
 
         let result = ObjString::take_string(chars, length as usize);

@@ -49,10 +49,10 @@ impl Display for Value2 {
                     let str_ptr = self.as_cstring();
                     let mut i = 0;
                     loop {
-                        if (*str_ptr.offset(i)) == '\0' {
+                        if (*str_ptr.offset(i)) == b'\0' {
                             break Ok(());
                         }
-                        write!(f, "{}", (*str_ptr.offset(i)))?;
+                        write!(f, "{}", (*str_ptr.offset(i)) as char)?;
                         i += 1;
                     }
                 },
@@ -118,7 +118,7 @@ impl Value2 {
     }
 
     // TODO(aalhendi): rename to as_native_string?
-    pub fn as_cstring(&self) -> *mut char {
+    pub fn as_cstring(&self) -> *mut u8 {
         unsafe { (*self.as_string()).chars }
     }
 
@@ -165,23 +165,7 @@ impl Value2 {
             ValueType::Bool => a.as_bool() == b.as_bool(),
             ValueType::Nil => true,
             ValueType::Number => a.as_number() == b.as_number(),
-            ValueType::Obj => {
-                let a_string = a.as_string();
-                let b_string = b.as_string();
-                unsafe {
-                    // PERF(aalhendi): ghetto memcmp, not sure about perf
-                    let length = (*a_string).length;
-                    if length != (*b_string).length {
-                        return false;
-                    }
-                    for c in 0..length {
-                        if (*(*a_string).chars.offset(c)) != (*(*b_string).chars.offset(c)) {
-                            return false;
-                        }
-                    }
-                    true
-                }
-            }
+            ValueType::Obj => a.as_obj() == b.as_obj(),
         }
     }
 }

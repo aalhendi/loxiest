@@ -106,7 +106,7 @@ fn free_object(object: *mut Obj2) {
         match (*object).type_ {
             ObjType::String => {
                 let string = object as *mut ObjString;
-                FREE_ARRAY!(char, (*string).chars, (*string).length as usize + 1);
+                FREE_ARRAY!(u8, (*string).chars, (*string).length as usize + 1);
                 FREE!(ObjString, object);
             }
         }
