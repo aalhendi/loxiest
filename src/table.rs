@@ -51,7 +51,7 @@ impl Table {
                 (*dst).value = (*entry).value;
                 self.count += 1;
             }
-            i+=1;
+            i += 1;
         }
 
         FREE_ARRAY!(Entry, self.entries, self.capacity as usize);
@@ -151,6 +151,7 @@ impl Table {
         }
     }
 
+    // TODO(aalhendi): consider making this an Option<Value2> return type
     /// value is an outptr
     pub fn get(&mut self, key: *mut ObjString, value: *mut Value2) -> bool {
         if self.count == 0 {

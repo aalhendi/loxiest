@@ -676,6 +676,7 @@ pub struct VM2 {
     ip: *mut u8,
     stack: [Value2; STACK_MAX],
     stack_top: *mut Value2,
+    pub globals: Table,
     pub strings: Table,
     pub objects: *mut Obj2, // Intrusive linked list head
 }
@@ -688,10 +689,12 @@ impl VM2 {
     pub fn init(&mut self) {
         self.reset_stack();
         self.objects = std::ptr::null_mut();
+        self.globals.init();
         self.strings.init();
     }
 
     pub fn free(&mut self) {
+        self.globals.free();
         self.strings.free();
         free_objects();
     }
@@ -702,6 +705,11 @@ impl VM2 {
         let byte = unsafe { *self.ip };
         self.ip = unsafe { self.ip.offset(1) };
         byte
+    }
+
+    #[allow(non_snake_case)]
+    fn READ_STRING(&mut self) -> *mut ObjString {
+        self.READ_CONSTANT().as_string()
     }
 
     #[allow(non_snake_case)]
@@ -734,8 +742,10 @@ impl VM2 {
 
             let instruction = OpCode::from(self.READ_BYTE());
             match instruction {
+                OpCode::Print => {
+                    println!("{}", self.pop());
+                }
                 OpCode::Return => {
-                    unsafe { (*self.chunk).constants.print_value(self.pop(), Some('\n')) };
                     return Ok(());
                 }
                 OpCode::Constant => {
@@ -753,6 +763,38 @@ impl VM2 {
                 OpCode::Nil => self.push(Value2::nil_val()),
                 OpCode::True => self.push(Value2::bool_val(true)),
                 OpCode::False => self.push(Value2::bool_val(false)),
+                OpCode::Pop => {
+                    self.pop();
+                }
+                OpCode::GetGlobal => {
+                    let name = self.READ_STRING();
+                    #[allow(clippy::uninit_assumed_init)]
+                    #[allow(invalid_value)]
+                    let value = unsafe { MaybeUninit::uninit().assume_init() };
+                    if !self.globals.get(name, value) {
+                        unsafe {
+                            let name_deref = &*name;
+                            self.runtime_error(&format!("Undefined variable '{name_deref}'."));
+                        }
+                    }
+                    unsafe { self.push(*value) };
+                }
+                OpCode::DefineGlobal => {
+                    let name = self.READ_STRING();
+                    self.globals.set(name, self.peek(0));
+                    self.pop();
+                }
+                OpCode::SetGlobal => {
+                    let name = self.READ_STRING();
+
+                    if self.globals.set(name, self.peek(0)) {
+                        self.globals.delete(name);
+                        unsafe {
+                            let name_deref = &*name;
+                            self.runtime_error(&format!("Undefined variable '{name_deref}'."));
+                        }
+                    }
+                }
                 OpCode::Equal => {
                     let b = self.pop();
                     let a = self.pop();

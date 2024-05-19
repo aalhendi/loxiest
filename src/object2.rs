@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use crate::memory::reallocate;
 use crate::value::Value2;
 use crate::{ALLOCATE, FREE_ARRAY, VM};
@@ -66,6 +68,15 @@ pub struct ObjString {
     pub length: isize,
     pub chars: *mut u8,
     pub hash: u32,
+}
+
+impl Display for ObjString {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for i in 0..self.length {
+            unsafe { write!(f, "{}", (*self.chars.offset(i)) as char)? }
+        }
+        Ok(())
+    }
 }
 
 impl ObjString {
