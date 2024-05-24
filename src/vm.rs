@@ -9,7 +9,7 @@ use std::{
 use crate::{
     chunk::{Chunk2, OpCode},
     compiler::{Compiler, FunctionType},
-    compiler2::Compiler2,
+    compiler2::{compile, Parser},
     memory::{free_objects, reallocate},
     object::{
         native_clock, NativeFn, Obj, ObjBoundMethod, ObjClass, ObjClosure, ObjInstance, ObjNative,
@@ -833,8 +833,7 @@ impl VM2 {
         let mut chunk: Chunk2 = unsafe { MaybeUninit::uninit().assume_init() };
         chunk.init();
 
-        let mut compiler = Compiler2::new(source, &mut chunk);
-        if !compiler.compile() {
+        if !compile(source, &mut chunk) {
             chunk.free();
             return Err(InterpretResult::CompileError);
         }

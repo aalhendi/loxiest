@@ -1,9 +1,10 @@
 use crate::{
     chunk::{Chunk, Chunk2, OpCode},
     object2::Obj2,
-    scanner::Scanner,
+    scanner::{self, Scanner},
     token::{Token, TokenType},
     value::{Value, Value2},
+    COMPILING_CHUNK,
 };
 
 #[derive(Debug, PartialEq, PartialOrd)]
@@ -42,15 +43,15 @@ impl From<u8> for Precedence {
 }
 
 struct ParseRule {
-    prefix: Option<fn(&mut Compiler2, bool)>,
-    infix: Option<fn(&mut Compiler2, bool)>,
+    prefix: Option<fn(&mut Parser, bool)>,
+    infix: Option<fn(&mut Parser, bool)>,
     precedence: Precedence,
 }
 
 impl ParseRule {
     fn new(
-        prefix: Option<fn(&mut Compiler2, bool)>,
-        infix: Option<fn(&mut Compiler2, bool)>,
+        prefix: Option<fn(&mut Parser, bool)>,
+        infix: Option<fn(&mut Parser, bool)>,
         precedence: Precedence,
     ) -> Self {
         Self {
@@ -61,45 +62,31 @@ impl ParseRule {
     }
 }
 
-pub struct Parser {
+pub struct Parser<'a> {
     previous: Token,
     current: Token,
     had_error: bool,
     panic_mode: bool,
+    scanner: Scanner<'a>,
 }
 
-impl Parser {
-    fn new() -> Self {
+impl<'a> Parser<'a> {
+    pub fn new(source: &'a str) -> Self {
         Self {
             previous: Token::new(TokenType::Undefined, "", 0),
             current: Token::new(TokenType::Undefined, "", 0),
             had_error: false,
             panic_mode: false,
-        }
-    }
-}
-
-pub struct Compiler2<'a> {
-    parser: Parser,
-    compiling_chunk: *mut Chunk2,
-    scanner: Scanner<'a>,
-}
-
-impl<'a> Compiler2<'a> {
-    pub fn new(source: &'a str, chunk: *mut Chunk2) -> Self {
-        Self {
-            parser: Parser::new(),
-            compiling_chunk: chunk,
             scanner: Scanner::new(source),
         }
     }
 
     fn current_chunk(&mut self) -> *mut Chunk2 {
-        self.compiling_chunk
+        unsafe { COMPILING_CHUNK }
     }
 
     fn check(&self, kind: &TokenType) -> bool {
-        &self.parser.current.kind == kind
+        &self.current.kind == kind
     }
 
     fn is_match(&mut self, kind: &TokenType) -> bool {
@@ -123,7 +110,7 @@ impl<'a> Compiler2<'a> {
     fn parse_variable(&mut self, error_msg: &str) -> u8 {
         self.consume(TokenType::Identifier, error_msg);
 
-        self.identifier_constant(&self.parser.previous.clone())
+        self.identifier_constant(&self.previous.clone())
     }
 
     fn var_declaration(&mut self) {
@@ -155,19 +142,19 @@ impl<'a> Compiler2<'a> {
             self.statement();
         }
 
-        if self.parser.panic_mode {
+        if self.panic_mode {
             self.synchronize();
         }
     }
 
     fn synchronize(&mut self) {
-        self.parser.panic_mode = false;
+        self.panic_mode = false;
 
-        while self.parser.current.kind != TokenType::Eof {
-            if self.parser.previous.kind == TokenType::Semicolon {
+        while self.current.kind != TokenType::Eof {
+            if self.previous.kind == TokenType::Semicolon {
                 return;
             }
-            match self.parser.current.kind {
+            match self.current.kind {
                 TokenType::Class
                 | TokenType::Fun
                 | TokenType::Var
@@ -201,24 +188,15 @@ impl<'a> Compiler2<'a> {
         self.emit_byte(OpCode::Print);
     }
 
-    pub fn compile(&mut self) -> bool {
-        self.advance();
-        while !self.is_match(&TokenType::Eof) {
-            self.declaration();
-        }
-        self.end_compiler();
-        !self.parser.had_error
-    }
-
     fn emit_byte<T: Into<u8>>(&mut self, byte: T) {
-        unsafe { (*self.current_chunk()).write(byte.into(), self.parser.previous.line as isize) };
+        unsafe { (*self.current_chunk()).write(byte.into(), self.previous.line as isize) };
     }
 
     fn end_compiler(&mut self) {
         self.emit_return();
         #[cfg(feature = "debug-print-code")]
         {
-            if !self.parser.had_error {
+            if !self.had_error {
                 unsafe { (*self.current_chunk()).disassemble("code") };
             }
         }
@@ -239,7 +217,6 @@ impl<'a> Compiler2<'a> {
 
     fn number(&mut self) {
         let value = self
-            .parser
             .previous
             .lexeme
             .parse::<f64>()
@@ -253,7 +230,7 @@ impl<'a> Compiler2<'a> {
     }
 
     fn unary(&mut self) {
-        let operator_type = &self.parser.previous.kind.clone();
+        let operator_type = &self.previous.kind.clone();
         self.parse_precedence(Precedence::Unary);
 
         match operator_type {
@@ -264,7 +241,7 @@ impl<'a> Compiler2<'a> {
     }
 
     fn literal(&mut self) {
-        match self.parser.previous.kind {
+        match self.previous.kind {
             TokenType::False => self.emit_byte(OpCode::False),
             TokenType::True => self.emit_byte(OpCode::True),
             TokenType::Nil => self.emit_byte(OpCode::Nil),
@@ -273,15 +250,15 @@ impl<'a> Compiler2<'a> {
     }
 
     fn string(&mut self) {
-        let chars = self.parser.previous.lexeme.as_bytes();
+        let chars = self.previous.lexeme.as_bytes();
         self.emit_constant(Value2::obj_val(Obj2::copy_string(
             &chars[1..chars.len() - 1],
-            self.parser.previous.lexeme.len() - 2,
+            self.previous.lexeme.len() - 2,
         )))
     }
 
     fn variable(&mut self, can_assign: bool) {
-        let name = &self.parser.previous.clone();
+        let name = &self.previous.clone();
         self.named_variable(name, can_assign);
     }
 
@@ -300,7 +277,7 @@ impl<'a> Compiler2<'a> {
     // But our desugaring assumes the latter is always the negation of the former.
     // TODO(aalhendi): Create instructions for (!=, <=, and >=). VM would execute faster if we did.
     fn binary(&mut self, _can_assign: bool) {
-        let operator_kind = &self.parser.previous.kind.clone();
+        let operator_kind = &self.previous.kind.clone();
         let rule = self.get_rule(operator_kind, _can_assign);
 
         let next = self.next_precedence(rule.precedence);
@@ -329,19 +306,13 @@ impl<'a> Compiler2<'a> {
     fn parse_precedence(&mut self, precedence: Precedence) {
         let can_assign = precedence <= Precedence::Assignment;
         self.advance();
-        match self.get_rule(&self.parser.previous.kind, can_assign).prefix {
+        match self.get_rule(&self.previous.kind, can_assign).prefix {
             Some(prefix_rule) => {
                 prefix_rule(self, can_assign);
 
-                while precedence
-                    <= self
-                        .get_rule(&self.parser.current.kind, can_assign)
-                        .precedence
-                {
+                while precedence <= self.get_rule(&self.current.kind, can_assign).precedence {
                     self.advance();
-                    if let Some(infix_rule) =
-                        self.get_rule(&self.parser.previous.kind, can_assign).infix
-                    {
+                    if let Some(infix_rule) = self.get_rule(&self.previous.kind, can_assign).infix {
                         infix_rule(self, can_assign);
                     }
                 }
@@ -462,20 +433,20 @@ impl<'a> Compiler2<'a> {
         constant as u8
     }
     fn advance(&mut self) {
-        self.parser.previous = self.parser.current.clone();
+        self.previous = self.current.clone();
 
         loop {
-            self.parser.current = self.scanner.scan_token();
-            if self.parser.current.kind != TokenType::Error {
+            self.current = self.scanner.scan_token();
+            if self.current.kind != TokenType::Error {
                 break;
             }
 
-            self.error_at_current(self.parser.current.lexeme.clone());
+            self.error_at_current(self.current.lexeme.clone());
         }
     }
 
     fn consume(&mut self, kind: TokenType, message: &str) {
-        if self.parser.current.kind == kind {
+        if self.current.kind == kind {
             self.advance();
         } else {
             self.error_at_current(message.to_owned());
@@ -483,18 +454,18 @@ impl<'a> Compiler2<'a> {
     }
 
     fn error_at_current(&mut self, message: String) {
-        self.error_at(&self.parser.current.clone(), message);
+        self.error_at(&self.current.clone(), message);
     }
 
     fn error(&mut self, message: &str) {
-        self.error_at(&self.parser.previous.clone(), message.to_owned());
+        self.error_at(&self.previous.clone(), message.to_owned());
     }
 
     fn error_at(&mut self, token: &Token, message: String) {
-        if self.parser.panic_mode {
+        if self.panic_mode {
             return;
         }
-        self.parser.panic_mode = true;
+        self.panic_mode = true;
         eprint!("[line {line}] Error", line = token.line);
         match token.kind {
             TokenType::Eof => eprint!(" at end"),
@@ -502,6 +473,17 @@ impl<'a> Compiler2<'a> {
             _ => eprint!(" at '{lexeme}'", lexeme = token.lexeme),
         }
         eprintln!(": {message}");
-        self.parser.had_error = true;
+        self.had_error = true;
     }
+}
+
+pub fn compile(source: &str, chunk: &mut Chunk2) -> bool {
+    unsafe { COMPILING_CHUNK = chunk };
+    let mut parser = Parser::new(source);
+    parser.advance();
+    while !parser.is_match(&TokenType::Eof) {
+        parser.declaration();
+    }
+    parser.end_compiler();
+    !parser.had_error
 }

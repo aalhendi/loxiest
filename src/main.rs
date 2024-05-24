@@ -10,6 +10,8 @@ use std::{
 };
 
 use chunk::{Chunk2, OpCode};
+use compiler2::Parser;
+use scanner::Scanner;
 use vm::{VM, VM2};
 
 mod chunk;
@@ -29,6 +31,8 @@ mod vm;
 // NOTE(aalhendi): Cant use MaybeUninit::uninit().assume_init() because static variables
 // must be initialized with a constant value or an expression that can be evaluated at compile-time.
 pub static mut VM: VM2 = unsafe { std::mem::zeroed() };
+pub static mut COMPILING_CHUNK: *mut Chunk2 = unsafe { std::mem::zeroed() };
+
 fn main() {
     unsafe {
         VM.init();
