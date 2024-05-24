@@ -766,6 +766,14 @@ impl VM2 {
                 OpCode::Pop => {
                     self.pop();
                 }
+                OpCode::GetLocal => {
+                    let slot = self.READ_BYTE();
+                    self.push(self.stack[slot as usize]);
+                }
+                OpCode::SetLocal => {
+                    let slot = self.READ_BYTE();
+                    self.stack[slot as usize] = self.peek(0);
+                }
                 OpCode::GetGlobal => {
                     let name = self.READ_STRING();
                     #[allow(clippy::uninit_assumed_init)]

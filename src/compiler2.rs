@@ -1,10 +1,12 @@
+use std::mem::MaybeUninit;
+
 use crate::{
     chunk::{Chunk, Chunk2, OpCode},
     object2::Obj2,
     scanner::{self, Scanner},
     token::{Token, TokenType},
     value::{Value, Value2},
-    COMPILING_CHUNK,
+    COMPILING_CHUNK, CURRENT,
 };
 
 #[derive(Debug, PartialEq, PartialOrd)]
@@ -104,13 +106,85 @@ impl<'a> Parser<'a> {
     }
 
     fn define_variable(&mut self, global: u8) {
+        if unsafe { (*CURRENT).scope_depth > 0 } {
+            self.mark_initialized();
+            return;
+        }
+
         self.emit_bytes(OpCode::DefineGlobal, global.into());
+    }
+
+    fn mark_initialized(&mut self) {
+        unsafe {
+            (*CURRENT).locals[(*CURRENT).local_count - 1].depth = (*CURRENT).scope_depth;
+        }
     }
 
     fn parse_variable(&mut self, error_msg: &str) -> u8 {
         self.consume(TokenType::Identifier, error_msg);
 
+        self.declare_variable();
+        if unsafe { (*CURRENT).scope_depth > 0 } {
+            return 0;
+        }
+
         self.identifier_constant(&self.previous.clone())
+    }
+
+    fn declare_variable(&mut self) {
+        if unsafe { (*CURRENT).scope_depth == 0 } {
+            return;
+        }
+
+        let name = &self.previous.clone();
+        let mut i = (unsafe { (*CURRENT).local_count } as isize) - 1;
+        while i >= 0 {
+            let local = unsafe { &(*CURRENT).locals[i as usize] };
+            if local.depth != 1 && local.depth < unsafe { (*CURRENT).scope_depth } {
+                break;
+            }
+
+            if self.identifiers_equal(name, &local.name) {
+                self.error("Already a variable with this name in this scope.");
+            }
+
+            i -= 1
+        }
+
+        self.add_local(name.clone());
+    }
+
+    fn identifiers_equal(&mut self, a: &Token, b: &Token) -> bool {
+        a == b
+    }
+
+    fn resolve_local(&mut self, compiler: *mut Compiler2, name: &Token) -> isize {
+        let mut i = (unsafe { (*compiler).local_count } as isize) - 1;
+        while i >= 0 {
+            let local = unsafe { &(*compiler).locals[i as usize] };
+            if self.identifiers_equal(name, &local.name) {
+                if local.depth == -1 {
+                    self.error("Can't read local variable in its own initializer.");
+                }
+                return i;
+            }
+            i -= 1;
+        }
+        -1
+    }
+
+    fn add_local(&mut self, name: Token) {
+        unsafe {
+            if (*CURRENT).local_count == u8::MAX as usize + 1 {
+                self.error("Too many local variables in function.");
+                return;
+            }
+
+            (*CURRENT).local_count += 1;
+            let local = &mut (*CURRENT).locals[(*CURRENT).local_count];
+            local.name = name;
+            local.depth = -1;
+        }
     }
 
     fn var_declaration(&mut self) {
@@ -177,6 +251,10 @@ impl<'a> Parser<'a> {
     fn statement(&mut self) {
         if self.is_match(&TokenType::Print) {
             self.print_statement();
+        } else if self.is_match(&TokenType::LeftBrace) {
+            self.begin_scope();
+            self.block();
+            self.end_scope();
         } else {
             self.expression_statement();
         }
@@ -224,6 +302,30 @@ impl<'a> Parser<'a> {
         self.emit_constant(Value2::number_val(value));
     }
 
+    fn begin_scope(&mut self) {
+        unsafe { (*CURRENT).scope_depth += 1 };
+    }
+
+    fn end_scope(&mut self) {
+        unsafe {
+            (*CURRENT).scope_depth -= 1;
+
+            while (*CURRENT).local_count > 0
+                && (*CURRENT).locals[(*CURRENT).local_count - 1].depth > (*CURRENT).scope_depth
+            {
+                self.emit_byte(OpCode::Pop); // TODO(aalhendi): OpCode::Pop_n
+                (*CURRENT).local_count -= 1;
+            }
+        }
+    }
+
+    fn block(&mut self) {
+        while !self.check(&TokenType::RightBrace) && !self.check(&TokenType::Eof) {
+            self.declaration();
+        }
+        self.consume(TokenType::RightBrace, "Expect '}' after block.");
+    }
+
     fn grouping(&mut self) {
         self.expression();
         self.consume(TokenType::RightParen, "Expect ')' after expression.")
@@ -263,12 +365,20 @@ impl<'a> Parser<'a> {
     }
 
     fn named_variable(&mut self, name: &Token, can_assign: bool) {
-        let arg = self.identifier_constant(name);
+        let mut arg = self.resolve_local(unsafe { CURRENT }, name);
+
+        let (get_op, set_op) = if arg != -1 {
+            (OpCode::GetLocal, OpCode::SetLocal)
+        } else {
+            arg = self.identifier_constant(name) as isize;
+            (OpCode::GetGlobal, OpCode::SetGlobal)
+        };
+
         if can_assign && self.is_match(&TokenType::Equal) {
             self.expression();
-            self.emit_bytes(OpCode::SetGlobal, arg.into());
+            self.emit_bytes(set_op, (arg as u8).into());
         } else {
-            self.emit_bytes(OpCode::GetGlobal, arg.into());
+            self.emit_bytes(get_op, (arg as u8).into());
         }
     }
 
@@ -276,9 +386,9 @@ impl<'a> Parser<'a> {
     // That means NaN <= 1 is false and NaN > 1 is also false.
     // But our desugaring assumes the latter is always the negation of the former.
     // TODO(aalhendi): Create instructions for (!=, <=, and >=). VM would execute faster if we did.
-    fn binary(&mut self, _can_assign: bool) {
+    fn binary(&mut self, can_assign: bool) {
         let operator_kind = &self.previous.kind.clone();
-        let rule = self.get_rule(operator_kind, _can_assign);
+        let rule = self.get_rule(operator_kind, can_assign);
 
         let next = self.next_precedence(rule.precedence);
         self.parse_precedence(next);
@@ -477,13 +587,37 @@ impl<'a> Parser<'a> {
     }
 }
 
+pub struct Compiler2 {
+    pub locals: [Local; u8::MAX as usize + 1],
+    pub local_count: usize,
+    pub scope_depth: isize,
+}
+
+pub struct Local {
+    name: Token,
+    depth: isize,
+}
+
 pub fn compile(source: &str, chunk: &mut Chunk2) -> bool {
-    unsafe { COMPILING_CHUNK = chunk };
     let mut parser = Parser::new(source);
+    #[allow(clippy::uninit_assumed_init)]
+    #[allow(invalid_value)]
+    let mut compiler: Compiler2 = unsafe { MaybeUninit::uninit().assume_init() };
+    compiler.init();
+    unsafe { COMPILING_CHUNK = chunk };
+
     parser.advance();
     while !parser.is_match(&TokenType::Eof) {
         parser.declaration();
     }
     parser.end_compiler();
     !parser.had_error
+}
+
+impl Compiler2 {
+    pub fn init(&mut self) {
+            self.local_count = 0;
+            self.scope_depth = 0;
+            unsafe { CURRENT = &mut *self }
+    }
 }

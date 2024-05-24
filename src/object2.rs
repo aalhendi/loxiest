@@ -53,7 +53,7 @@ impl Obj2 {
             for (idx, c) in chars.iter().enumerate() {
                 (*heap_chars.wrapping_add(idx)) = *c;
             }
-            (*heap_chars.wrapping_add(length + 1)) = b'\0'; // null terminator
+            (*heap_chars.wrapping_add(length)) = b'\0'; // null terminator
         }
 
         ObjString::allocate_string(heap_chars, length, hash)
