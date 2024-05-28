@@ -778,14 +778,14 @@ impl VM2 {
                     let name = self.READ_STRING();
                     #[allow(clippy::uninit_assumed_init)]
                     #[allow(invalid_value)]
-                    let value = unsafe { MaybeUninit::uninit().assume_init() };
-                    if !self.globals.get(name, value) {
+                    let mut value = unsafe { MaybeUninit::uninit().assume_init() };
+                    if !self.globals.get(name, &mut value) {
                         unsafe {
                             let name_deref = &*name;
                             self.runtime_error(&format!("Undefined variable '{name_deref}'."));
                         }
                     }
-                    unsafe { self.push(*value) };
+                    self.push(value);
                 }
                 OpCode::DefineGlobal => {
                     let name = self.READ_STRING();

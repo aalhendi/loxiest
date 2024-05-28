@@ -16,10 +16,10 @@ impl Token {
         }
     }
 
-    pub fn undefined() -> Self {
+    pub const fn undefined() -> Self {
         Self {
             kind: TokenType::Undefined,
-            lexeme: String::from(""),
+            lexeme: String::new(),
             line: 0,
         }
     }

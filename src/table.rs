@@ -68,17 +68,20 @@ impl Table {
                 if (*entry).key.is_null() {
                     if (*entry).value.is_nil() {
                         // Empty entry
-                        if tombstone.is_null() {
-                            return entry;
+                        return if tombstone.is_null() {
+                            entry
                         } else {
-                            return tombstone;
+                            tombstone
+                        };
+                    } else {
+                        // We found a tombstone.
+                        if tombstone.is_null() {
+                            tombstone = entry;
                         }
                     }
-                } else {
-                    // We found a tombstone
-                    if tombstone.is_null() {
-                        tombstone = entry;
-                    }
+                } else if (*entry).key == key {
+                    // We found the key.
+                    return entry;
                 }
 
                 index = (index + 1) % self.capacity as u32;
@@ -153,7 +156,7 @@ impl Table {
 
     // TODO(aalhendi): consider making this an Option<Value2> return type
     /// value is an outptr
-    pub fn get(&mut self, key: *mut ObjString, value: *mut Value2) -> bool {
+    pub fn get(&mut self, key: *mut ObjString, value: &mut Value2) -> bool {
         if self.count == 0 {
             return false;
         }

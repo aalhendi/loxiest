@@ -6,7 +6,7 @@ use crate::{
     scanner::{self, Scanner},
     token::{Token, TokenType},
     value::{Value, Value2},
-    COMPILING_CHUNK, CURRENT,
+    COMPILER, COMPILING_CHUNK, CURRENT,
 };
 
 #[derive(Debug, PartialEq, PartialOrd)]
@@ -600,10 +600,7 @@ pub struct Local {
 
 pub fn compile(source: &str, chunk: &mut Chunk2) -> bool {
     let mut parser = Parser::new(source);
-    #[allow(clippy::uninit_assumed_init)]
-    #[allow(invalid_value)]
-    let mut compiler: Compiler2 = unsafe { MaybeUninit::uninit().assume_init() };
-    compiler.init();
+    unsafe { COMPILER.init() };
     unsafe { COMPILING_CHUNK = chunk };
 
     parser.advance();
@@ -615,9 +612,23 @@ pub fn compile(source: &str, chunk: &mut Chunk2) -> bool {
 }
 
 impl Compiler2 {
+    pub const fn new_uninit() -> Self {
+        Self {
+            locals: {
+                const DEFAULT: Local = Local {
+                    name: Token::undefined(),
+                    depth: 0,
+                };
+                [DEFAULT; 256]
+            },
+            local_count: 0,
+            scope_depth: 0,
+        }
+    }
+
     pub fn init(&mut self) {
-            self.local_count = 0;
-            self.scope_depth = 0;
-            unsafe { CURRENT = &mut *self }
+        self.local_count = 0;
+        self.scope_depth = 0;
+        unsafe { CURRENT = &mut *self }
     }
 }

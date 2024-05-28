@@ -34,6 +34,7 @@ pub static mut VM: VM2 = unsafe { std::mem::zeroed() };
 pub static mut COMPILING_CHUNK: *mut Chunk2 = unsafe { std::mem::zeroed() };
 // TODO(aalhendi): eventually, compiler shouldn't be global
 pub static mut CURRENT: *mut Compiler2 = std::ptr::null_mut();
+pub static mut COMPILER: Compiler2 = Compiler2::new_uninit();
 
 fn main() {
     unsafe {
