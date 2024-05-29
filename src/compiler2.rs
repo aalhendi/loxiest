@@ -14,8 +14,8 @@ use crate::{
 enum Precedence {
     None,
     Assignment, // =
-    _Or,        // or
-    _And,       // and
+    Or,         // or
+    And,        // and
     Equality,   // == !=
     Comparison, // < > <= >=
     Term,       // + -
@@ -30,8 +30,8 @@ impl From<u8> for Precedence {
         match value {
             0 => Precedence::None,
             1 => Precedence::Assignment,
-            2 => Precedence::_Or,
-            3 => Precedence::_And,
+            2 => Precedence::Or,
+            3 => Precedence::And,
             4 => Precedence::Equality,
             5 => Precedence::Comparison,
             6 => Precedence::Term,
@@ -254,6 +254,10 @@ impl<'a> Parser<'a> {
             self.print_statement();
         } else if self.is_match(&TokenType::If) {
             self.if_statement();
+        } else if self.is_match(&TokenType::While) {
+            self.while_statement();
+        } else if self.is_match(&TokenType::For) {
+            self.for_statement();
         } else if self.is_match(&TokenType::LeftBrace) {
             self.begin_scope();
             self.block();
@@ -261,6 +265,71 @@ impl<'a> Parser<'a> {
         } else {
             self.expression_statement();
         }
+    }
+
+    /// Similar to if-statements, compiles condition expresion surrounded by mandatory parenthesis.
+    /// If condition is falsey then jump and skip over the subsequent body statement.
+    /// If truthy, execute the body statement then jump back to the loop_start before the condition.
+    /// This re-evaluates the condition expression on every iteration.
+    fn while_statement(&mut self) {
+        let loop_start = unsafe { (*self.current_chunk()).count };
+        self.consume(TokenType::LeftParen, "Expect '(' after 'while'.");
+        self.expression();
+        self.consume(TokenType::RightParen, "Expect ')' after condition.");
+
+        let exit_jump = self.emit_jump(OpCode::JumpIfFalse);
+        self.emit_byte(OpCode::Pop);
+        self.statement();
+        self.emit_loop(loop_start);
+
+        self.patch_jump(exit_jump);
+        self.emit_byte(OpCode::Pop);
+    }
+
+    fn for_statement(&mut self) {
+        self.begin_scope();
+        self.consume(TokenType::LeftParen, "Expect '(' after 'for'.");
+        if self.is_match(&TokenType::Semicolon) {
+            // No initializer
+        } else if self.is_match(&TokenType::Var) {
+            self.var_declaration();
+        } else {
+            // consumes semicolon.
+            self.expression_statement();
+        }
+
+        let mut loop_start = unsafe { (*self.current_chunk()).count };
+        let mut exit_jump = None;
+        if !self.is_match(&TokenType::Semicolon) {
+            self.expression();
+            self.consume(TokenType::Semicolon, "Expect ';' after loop condition.");
+
+            // Jump out of loop if condition is false.
+            exit_jump = Some(self.emit_jump(OpCode::JumpIfFalse));
+            self.emit_byte(OpCode::Pop);
+        }
+
+        if !self.is_match(&TokenType::RightParen) {
+            let body_jump = self.emit_jump(OpCode::Jump);
+            let increment_start= unsafe { (*self.current_chunk()).count };
+            self.expression();
+            self.emit_byte(OpCode::Pop);
+            self.consume(TokenType::RightParen, "Expect ')' after for clauses.");
+
+            self.emit_loop(loop_start);
+            loop_start = increment_start;
+            self.patch_jump(body_jump);
+        }
+
+        self.statement();
+        self.emit_loop(loop_start);
+
+        if let Some(exit_jump) = exit_jump {
+            self.patch_jump(exit_jump);
+            self.emit_byte(OpCode::Pop); // pops the condition value from stack
+        }
+
+        self.end_scope();
     }
 
     fn if_statement(&mut self) {
@@ -312,6 +381,19 @@ impl<'a> Parser<'a> {
 
     fn emit_byte<T: Into<u8>>(&mut self, byte: T) {
         unsafe { (*self.current_chunk()).write(byte.into(), self.previous.line as isize) };
+    }
+
+    fn emit_loop(&mut self, loop_start: isize) {
+        self.emit_byte(OpCode::Loop);
+
+        // +2 to adjust for bytecode for OP_LOOP offset itself
+        let offset = unsafe { (*self.current_chunk()).count - loop_start + 2 };
+        if offset > u16::MAX as isize {
+            self.error("Loop body too large.");
+        }
+
+        self.emit_byte(((offset >> 8) & u8::MAX as isize) as u8);
+        self.emit_byte((offset & u8::MAX as isize) as u8);
     }
 
     fn end_compiler(&mut self) {
@@ -424,6 +506,29 @@ impl<'a> Parser<'a> {
         } else {
             self.emit_bytes(get_op, (arg as u8).into());
         }
+    }
+
+    /// And expressions are "lazy" evaluated and short circuit if the left-hand side is falsey.
+    /// This means we skip the right operand and need to jump to the end of the right operand expression.
+    /// If the left-hand expression is truthy, then we discard it and eval the right operand expression.
+    fn and(&mut self) {
+        let end_jump = self.emit_jump(OpCode::JumpIfFalse);
+        self.emit_byte(OpCode::Pop);
+        self.parse_precedence(Precedence::And);
+        self.patch_jump(end_jump);
+    }
+
+    /// Or expressions are "lazy" evaluated and short circuit if the left-hand side is truthy.
+    /// This means we skip the right operand and need to jump to the end of the right operand expression.
+    fn or(&mut self) {
+        let else_jump = self.emit_jump(OpCode::JumpIfFalse);
+        let end_jump = self.emit_jump(OpCode::Jump);
+
+        self.patch_jump(else_jump);
+        self.emit_byte(OpCode::Pop);
+
+        self.parse_precedence(Precedence::Or);
+        self.patch_jump(end_jump);
     }
 
     // NOTE(aalhendi): According to IEEE 754, all comparison operators return false when an operand is NaN./
@@ -551,7 +656,7 @@ impl<'a> Parser<'a> {
             ),
             String => ParseRule::new(Some(|c, _can_assign| c.string()), None, Precedence::None),
             Number => ParseRule::new(Some(|c, _can_assign| c.number()), None, Precedence::None),
-            And => ParseRule::new(None, None, Precedence::None),
+            And => ParseRule::new(None, Some(|c, _can_assign| c.and()), Precedence::And),
             Class => ParseRule::new(None, None, Precedence::None),
             Else => ParseRule::new(None, None, Precedence::None),
             False => ParseRule::new(Some(|c, _can_assign| c.literal()), None, Precedence::None),
@@ -559,7 +664,7 @@ impl<'a> Parser<'a> {
             For => ParseRule::new(None, None, Precedence::None),
             If => ParseRule::new(None, None, Precedence::None),
             Nil => ParseRule::new(Some(|c, _can_assign| c.literal()), None, Precedence::None),
-            Or => ParseRule::new(None, None, Precedence::None),
+            Or => ParseRule::new(None, Some(|c, _can_assign| c.or()), Precedence::Or),
             Print => ParseRule::new(None, None, Precedence::None),
             Return => ParseRule::new(None, None, Precedence::None),
             Super => ParseRule::new(None, None, Precedence::None),

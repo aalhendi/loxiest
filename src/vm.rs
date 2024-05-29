@@ -765,6 +765,10 @@ impl VM2 {
                         self.ip = self.ip.wrapping_add(offset as usize);
                     }
                 }
+                OpCode::Loop => {
+                    let offset = self.READ_SHORT();
+                    self.ip = self.ip.wrapping_sub(offset as usize);
+                }
                 OpCode::Return => {
                     return Ok(());
                 }
