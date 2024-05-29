@@ -718,6 +718,16 @@ impl VM2 {
         unsafe { *(*self.chunk).constants.values.wrapping_add(constant_index) }
     }
 
+    #[allow(non_snake_case)]
+    pub fn READ_SHORT(&mut self) -> u16 {
+        let short = unsafe {
+            let bytes = std::slice::from_raw_parts(self.ip, 2);
+            ((bytes[0] as u16) << 8) | (bytes[1] as u16)
+        };
+        self.ip = unsafe { self.ip.offset(2) };
+        short
+    }
+
     pub fn run(&mut self) -> Result<(), InterpretResult> {
         loop {
             #[cfg(feature = "debug-trace-execution")]
@@ -744,6 +754,16 @@ impl VM2 {
             match instruction {
                 OpCode::Print => {
                     println!("{}", self.pop());
+                }
+                OpCode::Jump => {
+                    let offset = self.READ_SHORT();
+                    self.ip = self.ip.wrapping_add(offset as usize);
+                }
+                OpCode::JumpIfFalse => {
+                    let offset = self.READ_SHORT();
+                    if self.peek(0).is_falsey() {
+                        self.ip = self.ip.wrapping_add(offset as usize);
+                    }
                 }
                 OpCode::Return => {
                     return Ok(());

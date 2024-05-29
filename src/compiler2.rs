@@ -252,12 +252,55 @@ impl<'a> Parser<'a> {
     fn statement(&mut self) {
         if self.is_match(&TokenType::Print) {
             self.print_statement();
+        } else if self.is_match(&TokenType::If) {
+            self.if_statement();
         } else if self.is_match(&TokenType::LeftBrace) {
             self.begin_scope();
             self.block();
             self.end_scope();
         } else {
             self.expression_statement();
+        }
+    }
+
+    fn if_statement(&mut self) {
+        self.consume(TokenType::LeftParen, "Expect '(' after 'if'.");
+        self.expression();
+        self.consume(TokenType::RightParen, "Expect ')' after condition.");
+
+        let then_jump = self.emit_jump(OpCode::JumpIfFalse);
+        self.emit_byte(OpCode::Pop);
+        self.statement();
+
+        let else_jump = self.emit_jump(OpCode::Jump);
+        self.patch_jump(then_jump);
+        self.emit_byte(OpCode::Pop);
+
+        if self.is_match(&TokenType::Else) {
+            self.statement();
+        }
+        self.patch_jump(else_jump);
+    }
+
+    fn emit_jump<T: Into<u8>>(&mut self, instruction: T) -> isize {
+        self.emit_byte(instruction);
+        self.emit_byte(0xff);
+        self.emit_byte(0xff);
+
+        unsafe { (*self.current_chunk()).count - 2 }
+    }
+
+    fn patch_jump(&mut self, offset: isize) {
+        // -2 to adjust for the bytecode for the jump offset itself.
+        let jump = unsafe { (*self.current_chunk()).count } - offset - 2;
+
+        if jump > u16::MAX as isize {
+            self.error("Too much code to jump over.");
+        }
+
+        unsafe {
+            *(*self.current_chunk()).code.offset(offset) = ((jump >> 8) & 0xff) as u8;
+            *(*self.current_chunk()).code.offset(offset + 1) = (jump & 0xff) as u8;
         }
     }
 

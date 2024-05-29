@@ -145,7 +145,7 @@ impl From<u8> for OpCode {
 
 pub struct Chunk2 {
     capacity: isize,
-    count: isize,
+    pub count: isize,
     pub code: *mut u8,
     pub lines: *mut isize,
     pub constants: ValueArray2,
@@ -251,9 +251,8 @@ impl Chunk2 {
             | OpCode::SetUpvalue => self.byte_instruction(instruction, offset),
 
             OpCode::Jump | OpCode::JumpIfFalse | OpCode::Loop => {
-                // let is_loop = matches!(instruction, OpCode::Loop);
-                // self.jump_instruction(instruction, is_loop, offset)
-                todo!()
+                let is_loop = matches!(instruction, OpCode::Loop);
+                self.jump_instruction(instruction, is_loop, offset)
             }
 
             // OpCode::Invoke | OpCode::SuperInvoke => self.invoke_instruction(instruction, offset),
@@ -309,6 +308,23 @@ impl Chunk2 {
         let value = unsafe { *self.constants.values.wrapping_add(constant_idx) };
         self.constants.print_value(value, Some('\''));
         offset + 2
+    }
+
+    #[cfg(any(feature = "debug-trace-execution", feature = "debug-print-code"))]
+    fn jump_instruction(&self, name: OpCode, is_neg: bool, offset: usize) -> usize {
+        let name = name.to_string();
+        let jump = unsafe {
+            (((*self.code.wrapping_add(offset + 1)) as u16) << 8)
+                | ((*self.code.wrapping_add(offset + 2)) as u16)
+        };
+
+        // NOTE: This could underflow and that would be a bug in the impl so it shouldn't.
+        let dst = match is_neg {
+            true => offset + 3 - jump as usize,
+            false => offset + 3 + jump as usize,
+        };
+        println!("{name:-16} {offset:4} -> {dst}",);
+        offset + 3
     }
 }
 
