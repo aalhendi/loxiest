@@ -248,43 +248,41 @@ impl Chunk2 {
             | OpCode::SetLocal
             | OpCode::Call
             | OpCode::GetUpvalue
-            // | OpCode::SetUpvalue => self.byte_instruction(instruction, offset),
-            | OpCode::SetUpvalue => todo!(),
+            | OpCode::SetUpvalue => self.byte_instruction(instruction, offset),
 
             OpCode::Jump | OpCode::JumpIfFalse | OpCode::Loop => {
                 // let is_loop = matches!(instruction, OpCode::Loop);
                 // self.jump_instruction(instruction, is_loop, offset)
-            todo!()
+                todo!()
             }
 
             // OpCode::Invoke | OpCode::SuperInvoke => self.invoke_instruction(instruction, offset),
             OpCode::Invoke | OpCode::SuperInvoke => todo!(),
 
-            OpCode::Closure => todo!()
-            // OpCode::Closure => {
-            //     let mut idx = offset + 1;
-            //     let constant_idx = self.code[idx] as usize;
-            //     print!("{name:-16} {constant_idx:4} ", name = "OP_CLOSURE");
-            //     self.constants.print_value(constant_idx, None);
+            OpCode::Closure => todo!(), // OpCode::Closure => {
+                                        //     let mut idx = offset + 1;
+                                        //     let constant_idx = self.code[idx] as usize;
+                                        //     print!("{name:-16} {constant_idx:4} ", name = "OP_CLOSURE");
+                                        //     self.constants.print_value(constant_idx, None);
 
-            //     let c = self.constants.values[constant_idx].as_closure();
-            //     idx += 1;
-            //     for _ in 0..c.function.upvalue_count {
-            //         let is_local = if self.code[idx] == 0 {
-            //             "upvalue"
-            //         } else {
-            //             "local"
-            //         };
-            //         idx += 1;
-            //         let index = self.code[idx];
-            //         idx += 1;
-            //         println!(
-            //             "{:04}      |                     {is_local} {index}",
-            //             idx - 2
-            //         );
-            //     }
-            //     idx
-            // }
+                                        //     let c = self.constants.values[constant_idx].as_closure();
+                                        //     idx += 1;
+                                        //     for _ in 0..c.function.upvalue_count {
+                                        //         let is_local = if self.code[idx] == 0 {
+                                        //             "upvalue"
+                                        //         } else {
+                                        //             "local"
+                                        //         };
+                                        //         idx += 1;
+                                        //         let index = self.code[idx];
+                                        //         idx += 1;
+                                        //         println!(
+                                        //             "{:04}      |                     {is_local} {index}",
+                                        //             idx - 2
+                                        //         );
+                                        //     }
+                                        //     idx
+                                        // }
         }
     }
 
@@ -292,6 +290,14 @@ impl Chunk2 {
     fn simple_instruction(&self, code: OpCode, offset: usize) -> usize {
         println!("{code}");
         offset + 1
+    }
+
+    #[cfg(any(feature = "debug-trace-execution", feature = "debug-print-code"))]
+    fn byte_instruction(&self, name: OpCode, offset: usize) -> usize {
+        let slot = unsafe { *self.code.wrapping_add(offset + 1) };
+        let name = name.to_string();
+        println!("{name:-16} {slot:4}");
+        offset + 2
     }
 
     #[cfg(any(feature = "debug-trace-execution", feature = "debug-print-code"))]

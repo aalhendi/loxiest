@@ -155,7 +155,7 @@ impl<'a> Parser<'a> {
     }
 
     fn identifiers_equal(&mut self, a: &Token, b: &Token) -> bool {
-        a == b
+        a.lexeme == b.lexeme
     }
 
     fn resolve_local(&mut self, compiler: *mut Compiler2, name: &Token) -> isize {
@@ -180,8 +180,9 @@ impl<'a> Parser<'a> {
                 return;
             }
 
-            (*CURRENT).local_count += 1;
             let local = &mut (*CURRENT).locals[(*CURRENT).local_count];
+            (*CURRENT).local_count += 1;
+
             local.name = name;
             local.depth = -1;
         }
