@@ -6,7 +6,7 @@ use crate::{
     scanner::{self, Scanner},
     token::{Token, TokenType},
     value::{Value, Value2},
-    COMPILER, COMPILING_CHUNK, CURRENT,
+    COMPILER, COMPILING_CHUNK, CURRENT, PARSER,
 };
 
 #[derive(PartialEq, Clone)]
@@ -72,19 +72,19 @@ impl ParseRule {
     }
 }
 
-pub struct Parser<'a> {
+pub struct Parser {
     previous: Token,
     current: Token,
     had_error: bool,
     panic_mode: bool,
-    scanner: Scanner<'a>,
+    scanner: Scanner,
 }
 
-impl<'a> Parser<'a> {
-    pub fn new(source: &'a str) -> Self {
+impl Parser {
+    pub const fn new(source: String) -> Self {
         Self {
-            previous: Token::new(TokenType::Undefined, "", 0),
-            current: Token::new(TokenType::Undefined, "", 0),
+            previous: Token::undefined(),
+            current: Token::undefined(),
             had_error: false,
             panic_mode: false,
             scanner: Scanner::new(source),
@@ -124,6 +124,9 @@ impl<'a> Parser<'a> {
 
     fn mark_initialized(&mut self) {
         unsafe {
+            if (*CURRENT).scope_depth == 0 {
+                return;
+            }
             (*CURRENT).locals[(*CURRENT).local_count - 1].depth = (*CURRENT).scope_depth;
         }
     }
@@ -196,6 +199,13 @@ impl<'a> Parser<'a> {
         }
     }
 
+    fn fun_declaration(&mut self) {
+        let global = self.parse_variable("Expect function name.");
+        self.mark_initialized();
+        self.function(FunctionType::Function);
+        self.define_variable(global);
+    }
+
     fn var_declaration(&mut self) {
         let global = self.parse_variable("Expect variable name.");
 
@@ -218,7 +228,7 @@ impl<'a> Parser<'a> {
             // self.class_declaration();
             todo!()
         } else if self.is_match(&TokenType::Fun) {
-            // self.fun_declaration();
+            self.fun_declaration();
         } else if self.is_match(&TokenType::Var) {
             self.var_declaration();
         } else {
@@ -421,6 +431,9 @@ impl<'a> Parser<'a> {
             }
         }
 
+        unsafe {
+            CURRENT = (*CURRENT).enclosing;
+        }
         function
     }
 
@@ -468,6 +481,40 @@ impl<'a> Parser<'a> {
             self.declaration();
         }
         self.consume(TokenType::RightBrace, "Expect '}' after block.");
+    }
+
+    fn function(&mut self, function_type: FunctionType) {
+        let mut compiler = Compiler2::new_uninit();
+        compiler.init(function_type);
+        self.begin_scope();
+
+        self.consume(TokenType::LeftParen, "Expect '(' after function name.");
+        if !self.check(&TokenType::RightParen) {
+            loop {
+                unsafe {
+                    (*(*CURRENT).function).arity += 1;
+                    if (*(*CURRENT).function).arity > u8::MAX as isize {
+                        self.error_at_current("Can't have more than 255 parameters.".to_owned());
+                    }
+                }
+
+                // Semantically, a parameter is simply a local variable declared in the outermost lexical scope of the function body.
+                let constant = self.parse_variable("Expect parameter name.");
+                self.define_variable(constant);
+
+                if !self.is_match(&TokenType::Comma) {
+                    break;
+                }
+            }
+        }
+        self.consume(TokenType::RightParen, "Expect ')' after parameters.");
+        self.consume(TokenType::LeftBrace, "Expect '{' before function body.");
+        self.block();
+
+        let function = self.end_compiler();
+        let val = Value2::obj_val(function);
+        let constant = self.make_constant(val);
+        self.emit_bytes(OpCode::Constant, constant.into());
     }
 
     fn grouping(&mut self) {
@@ -755,6 +802,7 @@ impl<'a> Parser<'a> {
 }
 
 pub struct Compiler2 {
+    enclosing: *mut Compiler2,
     function: *mut ObjFunction,
     function_type: FunctionType,
 
@@ -768,25 +816,27 @@ pub struct Local {
     depth: isize,
 }
 
-pub fn compile(source: &str) -> *mut ObjFunction {
-    let mut parser = Parser::new(source);
-    unsafe { COMPILER.init(FunctionType::Script) };
+pub fn compile(source: String) -> *mut ObjFunction {
+    unsafe {
+        PARSER = Parser::new(source);
+        COMPILER.init(FunctionType::Script);
 
-    parser.advance();
-    while !parser.is_match(&TokenType::Eof) {
-        parser.declaration();
-    }
+        PARSER.advance();
+        while !PARSER.is_match(&TokenType::Eof) {
+            PARSER.declaration();
+        }
 
-    let function = parser.end_compiler();
-    if parser.had_error {
-        std::ptr::null_mut()
-    } else {
-        function
+        let function = PARSER.end_compiler();
+        if PARSER.had_error {
+            std::ptr::null_mut()
+        } else {
+            function
+        }
     }
 }
 
 impl Compiler2 {
-    pub const fn new_uninit(function_type: FunctionType) -> Self {
+    pub const fn new_uninit() -> Self {
         Self {
             locals: {
                 const DEFAULT: Local = Local {
@@ -798,11 +848,14 @@ impl Compiler2 {
             local_count: 0,
             scope_depth: 0,
             function: std::ptr::null_mut(),
-            function_type,
+            function_type: unsafe { std::mem::zeroed() },
+            enclosing: std::ptr::null_mut(),
         }
     }
 
     pub fn init(&mut self, function_type: FunctionType) {
+        let is_script = function_type == FunctionType::Script;
+        self.enclosing = unsafe { CURRENT };
         self.function = std::ptr::null_mut();
         self.function_type = function_type;
         self.local_count = 0;
@@ -810,6 +863,10 @@ impl Compiler2 {
         self.function = ObjFunction::new();
         unsafe {
             CURRENT = &mut *self;
+            if !is_script {
+                let chars = PARSER.previous.lexeme.as_bytes();
+                (*(*CURRENT).function).name = Obj2::copy_string(chars, chars.len());
+            }
 
             // compiler implicitly claims stack slot zero for the VM’s own internal use
             let local = &mut (*CURRENT).locals[(*CURRENT).local_count];

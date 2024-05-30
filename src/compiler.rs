@@ -153,15 +153,15 @@ impl ClassCompiler {
     }
 }
 
-pub struct Compiler<'a> {
+pub struct Compiler {
     parser: Parser,
-    scanner: Scanner<'a>,
+    scanner: Scanner,
     pub state: Vec<CompilerState>,               // Stack
     pub class_compilers: Vec<Rc<ClassCompiler>>, // Stack to manage class scopes. (current_class)
 }
 
-impl<'a> Compiler<'a> {
-    pub fn new(source: &'a str, kind: FunctionType) -> Self {
+impl Compiler {
+    pub fn new(source: String, kind: FunctionType) -> Self {
         Self {
             parser: Parser::new(),
             state: vec![CompilerState::new(kind)],

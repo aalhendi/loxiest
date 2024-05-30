@@ -1,14 +1,14 @@
 use crate::token::{Token, TokenType};
 
-pub struct Scanner<'a> {
-    source: &'a str,
+pub struct Scanner {
+    source: String,
     start: usize,
     current: usize,
     line: usize,
 }
 
-impl<'a> Scanner<'a> {
-    pub fn new(source: &'a str) -> Self {
+impl Scanner {
+    pub const fn new(source: String) -> Self {
         Self {
             source,
             start: 0,
@@ -169,7 +169,7 @@ impl<'a> Scanner<'a> {
         }
     }
 
-    fn error_token(&self, message: &'a str) -> Token {
+    fn error_token(&self, message: &str) -> Token {
         Token::new(TokenType::Error, message, self.line)
     }
 

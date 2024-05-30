@@ -94,7 +94,7 @@ impl VM {
 
     pub fn free(&mut self) {}
 
-    pub fn interpret(&mut self, source: &str) -> Result<(), InterpretResult> {
+    pub fn interpret(&mut self, source: String) -> Result<(), InterpretResult> {
         let mut compiler = Compiler::new(source, FunctionType::Script);
         if let Some(function) = compiler.compile() {
             let closure = Rc::new(ObjClosure::new(function));
@@ -895,7 +895,7 @@ impl VM2 {
         }
     }
 
-    pub fn interpret(&mut self, source: &str) -> Result<(), InterpretResult> {
+    pub fn interpret(&mut self, source: String) -> Result<(), InterpretResult> {
         let funciton = compile(source);
         if funciton.is_null() {
             return Err(InterpretResult::CompileError);

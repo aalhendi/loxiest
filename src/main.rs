@@ -26,15 +26,14 @@ mod token;
 mod value;
 mod vm;
 
-#[allow(clippy::uninit_assumed_init)]
-#[allow(invalid_value)]
 // NOTE(aalhendi): Cant use MaybeUninit::uninit().assume_init() because static variables
 // must be initialized with a constant value or an expression that can be evaluated at compile-time.
 pub static mut VM: VM2 = unsafe { std::mem::zeroed() };
 pub static mut COMPILING_CHUNK: *mut Chunk2 = unsafe { std::mem::zeroed() };
 // TODO(aalhendi): eventually, compiler shouldn't be global
 pub static mut CURRENT: *mut Compiler2 = std::ptr::null_mut();
-pub static mut COMPILER: Compiler2 = Compiler2::new_uninit(compiler2::FunctionType::Script);
+pub static mut COMPILER: Compiler2 = Compiler2::new_uninit();
+pub static mut PARSER: compiler2::Parser = Parser::new(String::new());
 
 fn main() {
     unsafe {
@@ -60,7 +59,7 @@ fn run_file(vm: *mut VM2, file_path: &str) -> io::Result<()> {
     let contents = fs::read_to_string(file_path)?;
     // EX_DATAERR (65) User input data was incorrect in some way.
     // EX_SOFTWARE (70) Internal software error. Limited to non-OS errors.
-    match unsafe { (*vm).interpret(&contents) } {
+    match unsafe { (*vm).interpret(contents) } {
         Ok(()) => Ok(()),
         Err(e) => match e {
             vm::InterpretResult::CompileError => std::process::exit(65),
@@ -82,7 +81,7 @@ fn repl(vm: *mut VM2) {
                 }
 
                 // TODO: Discarded result
-                let _ = unsafe { (*vm).interpret(&line) };
+                let _ = unsafe { (*vm).interpret(line) };
                 print!("> ");
                 io::stdout().flush().expect("Unable to flush stdout");
             }
