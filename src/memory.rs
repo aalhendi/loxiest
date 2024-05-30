@@ -4,7 +4,7 @@ use std::{
 };
 
 use crate::{
-    object2::{Obj2, ObjString, ObjType},
+    object2::{Obj2, ObjFunction, ObjString, ObjType},
     VM,
 };
 
@@ -108,6 +108,11 @@ fn free_object(object: *mut Obj2) {
                 let string = object as *mut ObjString;
                 FREE_ARRAY!(u8, (*string).chars, (*string).length as usize + 1);
                 FREE!(ObjString, object);
+            }
+            ObjType::Function => {
+                let function = object as *mut ObjFunction;
+                (*function).chunk.free();
+                FREE!(ObjFunction, object);
             }
         }
     }

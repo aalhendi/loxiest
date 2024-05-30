@@ -2,12 +2,20 @@ use std::mem::MaybeUninit;
 
 use crate::{
     chunk::{Chunk, Chunk2, OpCode},
-    object2::Obj2,
+    object2::{Obj2, ObjFunction},
     scanner::{self, Scanner},
     token::{Token, TokenType},
     value::{Value, Value2},
     COMPILER, COMPILING_CHUNK, CURRENT,
 };
+
+#[derive(PartialEq, Clone)]
+pub enum FunctionType {
+    Function,
+    Script,
+    // Method,
+    // Initializer,
+}
 
 #[derive(Debug, PartialEq, PartialOrd)]
 #[repr(u8)]
@@ -84,7 +92,7 @@ impl<'a> Parser<'a> {
     }
 
     fn current_chunk(&mut self) -> *mut Chunk2 {
-        unsafe { COMPILING_CHUNK }
+        unsafe { &mut (*(*CURRENT).function).chunk }
     }
 
     fn check(&self, kind: &TokenType) -> bool {
@@ -311,7 +319,7 @@ impl<'a> Parser<'a> {
 
         if !self.is_match(&TokenType::RightParen) {
             let body_jump = self.emit_jump(OpCode::Jump);
-            let increment_start= unsafe { (*self.current_chunk()).count };
+            let increment_start = unsafe { (*self.current_chunk()).count };
             self.expression();
             self.emit_byte(OpCode::Pop);
             self.consume(TokenType::RightParen, "Expect ')' after for clauses.");
@@ -396,14 +404,24 @@ impl<'a> Parser<'a> {
         self.emit_byte((offset & u8::MAX as isize) as u8);
     }
 
-    fn end_compiler(&mut self) {
+    fn end_compiler(&mut self) -> *mut ObjFunction {
         self.emit_return();
+        let function = unsafe { (*CURRENT).function };
         #[cfg(feature = "debug-print-code")]
         {
             if !self.had_error {
-                unsafe { (*self.current_chunk()).disassemble("code") };
+                unsafe {
+                    if (*function).name.is_null() {
+                        (*self.current_chunk()).disassemble("<script>");
+                    } else {
+                        let name = &(*(*function).name);
+                        (*self.current_chunk()).disassemble(name);
+                    }
+                }
             }
         }
+
+        function
     }
 
     fn emit_return(&mut self) {
@@ -737,6 +755,9 @@ impl<'a> Parser<'a> {
 }
 
 pub struct Compiler2 {
+    function: *mut ObjFunction,
+    function_type: FunctionType,
+
     pub locals: [Local; u8::MAX as usize + 1],
     pub local_count: usize,
     pub scope_depth: isize,
@@ -747,21 +768,25 @@ pub struct Local {
     depth: isize,
 }
 
-pub fn compile(source: &str, chunk: &mut Chunk2) -> bool {
+pub fn compile(source: &str) -> *mut ObjFunction {
     let mut parser = Parser::new(source);
-    unsafe { COMPILER.init() };
-    unsafe { COMPILING_CHUNK = chunk };
+    unsafe { COMPILER.init(FunctionType::Script) };
 
     parser.advance();
     while !parser.is_match(&TokenType::Eof) {
         parser.declaration();
     }
-    parser.end_compiler();
-    !parser.had_error
+
+    let function = parser.end_compiler();
+    if parser.had_error {
+        std::ptr::null_mut()
+    } else {
+        function
+    }
 }
 
 impl Compiler2 {
-    pub const fn new_uninit() -> Self {
+    pub const fn new_uninit(function_type: FunctionType) -> Self {
         Self {
             locals: {
                 const DEFAULT: Local = Local {
@@ -772,12 +797,25 @@ impl Compiler2 {
             },
             local_count: 0,
             scope_depth: 0,
+            function: std::ptr::null_mut(),
+            function_type,
         }
     }
 
-    pub fn init(&mut self) {
+    pub fn init(&mut self, function_type: FunctionType) {
+        self.function = std::ptr::null_mut();
+        self.function_type = function_type;
         self.local_count = 0;
         self.scope_depth = 0;
-        unsafe { CURRENT = &mut *self }
+        self.function = ObjFunction::new();
+        unsafe {
+            CURRENT = &mut *self;
+
+            // compiler implicitly claims stack slot zero for the VM’s own internal use
+            let local = &mut (*CURRENT).locals[(*CURRENT).local_count];
+            (*CURRENT).local_count += 1;
+            local.depth = 0;
+            local.name.lexeme = String::new();
+        }
     }
 }

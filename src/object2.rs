@@ -1,5 +1,6 @@
 use std::fmt::Display;
 
+use crate::chunk::Chunk2;
 use crate::memory::reallocate;
 use crate::value::Value2;
 use crate::{ALLOCATE, FREE_ARRAY, VM};
@@ -23,6 +24,7 @@ fn allocate_object(size: usize, type_: ObjType) -> *mut Obj2 {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ObjType {
     String,
+    Function,
 }
 
 #[repr(C)]
@@ -105,17 +107,27 @@ impl ObjString {
     }
 }
 
+#[repr(C)]
+pub struct ObjFunction {
+    obj: Obj2,
+    pub arity: isize,
+    pub chunk: Chunk2,
+    pub name: *mut ObjString,
+}
+
+impl ObjFunction {
+    pub fn new() -> *mut Self {
+        let function = ALLOCATE_OBJ!(ObjFunction, ObjType::Function);
+        unsafe {
+            (*function).arity = 0;
+            (*function).name = std::ptr::null_mut();
+            (*function).chunk.init();
+        }
+        function
+    }
+}
+
 /// FNV-1a
-// fn hash_string(key: *const u8, length: usize) -> u32 {
-//     let mut hash = 2166136261_u32;
-//     for i in 0..length {
-//         unsafe {
-//             hash ^= (*key.wrapping_add(i)) as u32;
-//             hash.wrapping_mul(16777619);
-//         }
-//     }
-//     hash
-// }
 fn hash_string(key: *const u8, length: isize) -> u32 {
     let mut hash = 2166136261u32;
     for i in 0..length {

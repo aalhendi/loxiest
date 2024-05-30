@@ -9,7 +9,7 @@ use std::{
 
 use crate::{
     memory::reallocate,
-    object2::{Obj2, ObjString, ObjType},
+    object2::{Obj2, ObjFunction, ObjString, ObjType},
     FREE_ARRAY,
 };
 use crate::{
@@ -55,6 +55,24 @@ impl Display for Value2 {
                         write!(f, "{}", (*str_ptr.offset(i)) as char)?;
                         i += 1;
                     }
+                },
+                ObjType::Function => unsafe {
+                    let name_ptr = (*self.as_function()).name;
+                    if name_ptr.is_null() {
+                        return write!(f, "<script>");
+                    }
+
+                    write!(f, "<fn ")?;
+                    let str_ptr = (*name_ptr).chars;
+                    let mut i = 0;
+                    loop {
+                        if (*str_ptr.offset(i)) == b'\0' {
+                            break;
+                        }
+                        write!(f, "{}", (*str_ptr.offset(i)) as char)?;
+                        i += 1;
+                    }
+                    write!(f, ">",)
                 },
             },
         }
@@ -120,6 +138,14 @@ impl Value2 {
     // TODO(aalhendi): rename to as_native_string?
     pub fn as_cstring(&self) -> *mut u8 {
         unsafe { (*self.as_string()).chars }
+    }
+
+    pub fn as_function(&self) -> *mut ObjFunction {
+        debug_assert!(self.type_ == ValueType::Obj);
+        unsafe {
+            debug_assert!((*self.as_obj()).obj_type() == ObjType::Function);
+            std::mem::transmute(self.as_obj())
+        }
     }
 
     pub fn is_bool(&self) -> bool {

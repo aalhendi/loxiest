@@ -15,7 +15,7 @@ use crate::{
         native_clock, NativeFn, Obj, ObjBoundMethod, ObjClass, ObjClosure, ObjInstance, ObjNative,
         ObjUpvalue,
     },
-    object2::{Obj2, ObjString, ObjType},
+    object2::{Obj2, ObjFunction, ObjString, ObjType},
     table::Table,
     value::{Value, Value2},
     ALLOCATE,
@@ -41,7 +41,7 @@ macro_rules! binary_op {
 }
 
 const FRAMES_MAX: usize = 64;
-const STACK_MAX: usize = 256;
+const STACK_MAX: usize = FRAMES_MAX * (u8::MAX as usize + 1);
 
 pub enum InterpretResult {
     CompileError,
@@ -671,9 +671,16 @@ impl VM {
     }
 }
 
+pub struct CallFrame2 {
+    pub function: *mut ObjFunction,
+    pub ip: *mut u8,
+    pub slots: *mut Value2,
+}
+
 pub struct VM2 {
-    chunk: *mut Chunk2,
-    ip: *mut u8,
+    frames: [CallFrame2; FRAMES_MAX],
+    frame_count: usize,
+
     stack: [Value2; STACK_MAX],
     stack_top: *mut Value2,
     pub globals: Table,
@@ -684,6 +691,7 @@ pub struct VM2 {
 impl VM2 {
     fn reset_stack(&mut self) {
         self.stack_top = self.stack.as_mut_ptr();
+        self.frame_count = 0;
     }
 
     pub fn init(&mut self) {
@@ -702,8 +710,9 @@ impl VM2 {
     #[allow(non_snake_case)]
     // PERF(aalhendi): is macro faster?
     pub fn READ_BYTE(&mut self) -> u8 {
-        let byte = unsafe { *self.ip };
-        self.ip = unsafe { self.ip.offset(1) };
+        let frame = self.get_frame();
+        let byte = unsafe { *(*frame).ip };
+        unsafe { (*frame).ip = (*frame).ip.offset(1) };
         byte
     }
 
@@ -715,17 +724,29 @@ impl VM2 {
     #[allow(non_snake_case)]
     pub fn READ_CONSTANT(&mut self) -> Value2 {
         let constant_index = self.READ_BYTE() as usize;
-        unsafe { *(*self.chunk).constants.values.wrapping_add(constant_index) }
+        let frame = self.get_frame();
+        unsafe {
+            *(*(*frame).function)
+                .chunk
+                .constants
+                .values
+                .wrapping_add(constant_index)
+        }
     }
 
     #[allow(non_snake_case)]
     pub fn READ_SHORT(&mut self) -> u16 {
+        let frame = self.get_frame();
         let short = unsafe {
-            let bytes = std::slice::from_raw_parts(self.ip, 2);
+            let bytes = std::slice::from_raw_parts((*frame).ip, 2);
             ((bytes[0] as u16) << 8) | (bytes[1] as u16)
         };
-        self.ip = unsafe { self.ip.offset(2) };
+        unsafe { (*frame).ip = (*frame).ip.offset(2) };
         short
+    }
+
+    fn get_frame(&mut self) -> *mut CallFrame2 {
+        &mut self.frames[self.frame_count - 1]
     }
 
     pub fn run(&mut self) -> Result<(), InterpretResult> {
@@ -740,13 +761,14 @@ impl VM2 {
                     slot = slot.wrapping_add(1);
                 }
                 println!(); // newline
+                let frame = self.get_frame();
                 let offset = unsafe {
-                    let chunk_code_ptr = (*self.chunk).code;
-                    let ip_ptr = self.ip;
+                    let chunk_code_ptr = (*(*frame).function).chunk.code;
+                    let ip_ptr = (*frame).ip;
                     ip_ptr.offset_from(chunk_code_ptr) as usize
                 };
                 unsafe {
-                    (*self.chunk).disassemble_instruction(offset);
+                    (*(*frame).function).chunk.disassemble_instruction(offset);
                 }
             }
 
@@ -757,17 +779,26 @@ impl VM2 {
                 }
                 OpCode::Jump => {
                     let offset = self.READ_SHORT();
-                    self.ip = self.ip.wrapping_add(offset as usize);
+                    let frame = self.get_frame();
+                    unsafe {
+                        (*frame).ip = (*frame).ip.wrapping_add(offset as usize);
+                    }
                 }
                 OpCode::JumpIfFalse => {
                     let offset = self.READ_SHORT();
                     if self.peek(0).is_falsey() {
-                        self.ip = self.ip.wrapping_add(offset as usize);
+                        let frame = self.get_frame();
+                        unsafe {
+                            (*frame).ip = (*frame).ip.wrapping_add(offset as usize);
+                        }
                     }
                 }
                 OpCode::Loop => {
                     let offset = self.READ_SHORT();
-                    self.ip = self.ip.wrapping_sub(offset as usize);
+                    let frame = self.get_frame();
+                    unsafe {
+                        (*frame).ip = (*frame).ip.wrapping_sub(offset as usize);
+                    }
                 }
                 OpCode::Return => {
                     return Ok(());
@@ -792,11 +823,16 @@ impl VM2 {
                 }
                 OpCode::GetLocal => {
                     let slot = self.READ_BYTE();
-                    self.push(self.stack[slot as usize]);
+                    let frame = self.get_frame();
+                    let val = unsafe { *(*frame).slots.wrapping_add(slot as usize) };
+                    self.push(val);
                 }
                 OpCode::SetLocal => {
                     let slot = self.READ_BYTE();
-                    self.stack[slot as usize] = self.peek(0);
+                    let frame = self.get_frame();
+                    unsafe {
+                        *(*frame).slots.wrapping_add(slot as usize) = self.peek(0);
+                    }
                 }
                 OpCode::GetGlobal => {
                     let name = self.READ_STRING();
@@ -860,22 +896,19 @@ impl VM2 {
     }
 
     pub fn interpret(&mut self, source: &str) -> Result<(), InterpretResult> {
-        #[allow(clippy::uninit_assumed_init)]
-        #[allow(invalid_value)]
-        let mut chunk: Chunk2 = unsafe { MaybeUninit::uninit().assume_init() };
-        chunk.init();
-
-        if !compile(source, &mut chunk) {
-            chunk.free();
+        let funciton = compile(source);
+        if funciton.is_null() {
             return Err(InterpretResult::CompileError);
         }
 
-        self.chunk = &mut chunk;
-        self.ip = unsafe { (*self.chunk).code };
+        self.push(Value2::obj_val(funciton));
+        let frame = &mut self.frames[self.frame_count];
+        self.frame_count += 1;
+        frame.function = funciton;
+        frame.ip = unsafe { (*funciton).chunk.code };
+        frame.slots = self.stack.as_mut_ptr();
 
-        let result = self.run();
-        chunk.free();
-        result
+        self.run()
     }
 
     fn concatenate(&mut self) {
@@ -902,9 +935,10 @@ impl VM2 {
     }
 
     fn runtime_error(&mut self, message: &str) {
-        // let instruction = unsafe { (*self.ip) - (*self.chunk).code - 1 };
-        let instruction = unsafe { self.ip as usize - (*self.chunk).code as usize - 1 };
-        let line = unsafe { *((*self.chunk).lines.wrapping_add(instruction)) };
+        let frame = self.get_frame();
+        let instruction =
+            unsafe { (*frame).ip as usize - (*(*frame).function).chunk.code as usize - 1 };
+        let line = unsafe { *((*(*frame).function).chunk.lines.wrapping_add(instruction)) };
         eprintln!("{message}");
         eprintln!("[line {line}] in script");
         self.reset_stack();
