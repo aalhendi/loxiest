@@ -800,8 +800,24 @@ impl VM2 {
                         (*frame).ip = (*frame).ip.wrapping_sub(offset as usize);
                     }
                 }
+                OpCode::Call => {
+                    let arg_count = self.READ_BYTE();
+                    let value = self.peek(arg_count as isize);
+                    if !self.call_value(value, arg_count) {
+                        return Err(InterpretResult::RuntimeError);
+                    }
+                }
                 OpCode::Return => {
-                    return Ok(());
+                    let result = self.pop();
+                    let old_frame = self.get_frame();
+                    self.frame_count -= 1;
+                    if self.frame_count == 0 {
+                        self.pop();
+                        return Ok(());
+                    }
+
+                    self.stack_top = unsafe { (*old_frame).slots };
+                    self.push(result);
                 }
                 OpCode::Constant => {
                     let constant = self.READ_CONSTANT();
@@ -902,11 +918,7 @@ impl VM2 {
         }
 
         self.push(Value2::obj_val(funciton));
-        let frame = &mut self.frames[self.frame_count];
-        self.frame_count += 1;
-        frame.function = funciton;
-        frame.ip = unsafe { (*funciton).chunk.code };
-        frame.slots = self.stack.as_mut_ptr();
+        self.call(funciton, 0);
 
         self.run()
     }
@@ -935,12 +947,23 @@ impl VM2 {
     }
 
     fn runtime_error(&mut self, message: &str) {
-        let frame = self.get_frame();
-        let instruction =
-            unsafe { (*frame).ip as usize - (*(*frame).function).chunk.code as usize - 1 };
-        let line = unsafe { *((*(*frame).function).chunk.lines.wrapping_add(instruction)) };
         eprintln!("{message}");
-        eprintln!("[line {line}] in script");
+
+        for i in (0..=self.frame_count - 1).rev() {
+            let frame = &self.frames[i];
+            let function = frame.function;
+            let instruction = unsafe { frame.ip as usize - (*function).chunk.code as usize - 1 };
+            let line = unsafe { *((*function).chunk.lines.wrapping_add(instruction)) };
+            let name = unsafe {
+                if (*function).name.is_null() {
+                    "script".to_owned()
+                } else {
+                    format!("{}()", (*(*function).name))
+                }
+            };
+            eprintln!("[line {line}] in {name}")
+        }
+
         self.reset_stack();
     }
 
@@ -956,5 +979,37 @@ impl VM2 {
 
     fn peek(&self, distance: isize) -> Value2 {
         unsafe { *self.stack_top.offset(-1 - distance) }
+    }
+
+    fn call(&mut self, function: *mut ObjFunction, arg_count: u8) -> bool {
+        let arity = unsafe { (*function).arity } as u8;
+        if arg_count != arity {
+            self.runtime_error(&format!("Expected {arity} arguments but got {arg_count}"));
+            return false;
+        }
+
+        if self.frame_count == FRAMES_MAX {
+            self.runtime_error("Stack overflow.");
+            return false;
+        }
+
+        let frame = &mut self.frames[self.frame_count];
+        self.frame_count += 1;
+        frame.function = function;
+        frame.ip = unsafe { (*function).chunk.code };
+        frame.slots = unsafe { self.stack_top.offset(-(arg_count as isize) - 1) };
+        true
+    }
+
+    fn call_value(&mut self, callee: Value2, arg_count: u8) -> bool {
+        if callee.is_obj() {
+            match callee.obj_type() {
+                ObjType::Function => return self.call(callee.as_function(), arg_count),
+                ObjType::String => { /* Non-Callable Object Type */ }
+            }
+        }
+
+        self.runtime_error("Can only call funcitons and classes.");
+        false
     }
 }

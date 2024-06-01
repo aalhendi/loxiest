@@ -29,7 +29,7 @@ enum Precedence {
     Term,       // + -
     Factor,     // * /
     Unary,      // ! -
-    _Call,      // . ()
+    Call,       // . ()
     Primary,
 }
 
@@ -45,7 +45,7 @@ impl From<u8> for Precedence {
             6 => Precedence::Term,
             7 => Precedence::Factor,
             8 => Precedence::Unary,
-            9 => Precedence::_Call,
+            9 => Precedence::Call,
             10 => Precedence::Primary,
             _ => panic!("Unknown precedence value: {}", value),
         }
@@ -272,6 +272,8 @@ impl Parser {
             self.print_statement();
         } else if self.is_match(&TokenType::If) {
             self.if_statement();
+        } else if self.is_match(&TokenType::Return) {
+            self.return_statement();
         } else if self.is_match(&TokenType::While) {
             self.while_statement();
         } else if self.is_match(&TokenType::For) {
@@ -397,6 +399,26 @@ impl Parser {
         self.emit_byte(OpCode::Print);
     }
 
+    fn return_statement(&mut self) {
+        if unsafe { (*CURRENT).function_type == FunctionType::Script } {
+            self.error("Can't return from top-level code.");
+        }
+        if self.is_match(&TokenType::Semicolon) {
+            // This implicitly returns nil.
+            self.emit_return();
+        } else {
+            // if self.state.last().unwrap().kind == FunctionType::Initializer {
+            //     self.error("Can't return a value from an initializer.");
+            // }
+            // compile the value afterwards so compiler doesn’t get confused by trailing expression
+            // and report a bunch of cascaded errors
+
+            self.expression();
+            self.consume(TokenType::Semicolon, "Expect ';' after return value.");
+            self.emit_byte(OpCode::Return);
+        }
+    }
+
     fn emit_byte<T: Into<u8>>(&mut self, byte: T) {
         unsafe { (*self.current_chunk()).write(byte.into(), self.previous.line as isize) };
     }
@@ -438,6 +460,7 @@ impl Parser {
     }
 
     fn emit_return(&mut self) {
+        self.emit_byte(OpCode::Nil);
         self.emit_byte(OpCode::Return);
     }
 
@@ -622,6 +645,31 @@ impl Parser {
         }
     }
 
+    fn call(&mut self) {
+        let arg_count = self.argument_list();
+        self.emit_bytes(OpCode::Call as u8, arg_count);
+    }
+
+    fn argument_list(&mut self) -> u8 {
+        let mut arg_count = 0;
+
+        if !self.check(&TokenType::RightParen) {
+            loop {
+                self.expression();
+                if arg_count == u8::MAX {
+                    self.error("Can't have more than 255 arguments.");
+                }
+                arg_count += 1;
+
+                if !self.is_match(&TokenType::Comma) {
+                    break;
+                }
+            }
+        }
+        self.consume(TokenType::RightParen, "Expect ')' after arguments.");
+        arg_count
+    }
+
     fn next_precedence(&self, precedence: Precedence) -> Precedence {
         // Precedence::Primary has no next.
         Precedence::from(precedence as u8 + 1)
@@ -653,9 +701,11 @@ impl Parser {
         // TODO: Kill this function once array is used. Just index the array
         use TokenType::*;
         match kind {
-            LeftParen => {
-                ParseRule::new(Some(|c, _can_assign| c.grouping()), None, Precedence::None)
-            }
+            LeftParen => ParseRule::new(
+                Some(|c, _can_assign| c.grouping()),
+                Some(|c, _can_assign| c.call()),
+                Precedence::Call,
+            ),
             RightParen => ParseRule::new(None, None, Precedence::None),
             LeftBrace => ParseRule::new(None, None, Precedence::None),
             RightBrace => ParseRule::new(None, None, Precedence::None),
