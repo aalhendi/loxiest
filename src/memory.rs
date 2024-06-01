@@ -4,7 +4,7 @@ use std::{
 };
 
 use crate::{
-    object2::{Obj2, ObjFunction, ObjString, ObjType},
+    object2::{Obj2, ObjFunction, ObjNative2, ObjString, ObjType},
     VM,
 };
 
@@ -113,6 +113,9 @@ fn free_object(object: *mut Obj2) {
                 let function = object as *mut ObjFunction;
                 (*function).chunk.free();
                 FREE!(ObjFunction, object);
+            }
+            ObjType::Native => {
+                FREE!(ObjNative2, object);
             }
         }
     }

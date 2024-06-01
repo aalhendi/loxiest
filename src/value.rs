@@ -9,7 +9,7 @@ use std::{
 
 use crate::{
     memory::reallocate,
-    object2::{Obj2, ObjFunction, ObjString, ObjType},
+    object2::{Obj2, ObjFunction, ObjNative2, ObjString, ObjType},
     FREE_ARRAY,
 };
 use crate::{
@@ -74,6 +74,7 @@ impl Display for Value2 {
                     }
                     write!(f, ">",)
                 },
+                ObjType::Native => write!(f, "<native fn>"),
             },
         }
     }
@@ -145,6 +146,14 @@ impl Value2 {
         unsafe {
             debug_assert!((*self.as_obj()).obj_type() == ObjType::Function);
             std::mem::transmute(self.as_obj())
+        }
+    }
+
+    pub fn as_native(&self) -> fn(arg_count: usize, args: &[Value2]) -> Value2 {
+        debug_assert!(self.type_ == ValueType::Obj);
+        unsafe {
+            debug_assert!((*self.as_obj()).obj_type() == ObjType::Native);
+            (*std::mem::transmute::<*mut Obj2, *mut ObjNative2>(self.as_obj())).function
         }
     }
 

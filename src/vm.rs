@@ -15,7 +15,7 @@ use crate::{
         native_clock, NativeFn, Obj, ObjBoundMethod, ObjClass, ObjClosure, ObjInstance, ObjNative,
         ObjUpvalue,
     },
-    object2::{Obj2, ObjFunction, ObjString, ObjType},
+    object2::{native_clock2, NativeFn2, Obj2, ObjFunction, ObjNative2, ObjString, ObjType},
     table::Table,
     value::{Value, Value2},
     ALLOCATE,
@@ -699,6 +699,8 @@ impl VM2 {
         self.objects = std::ptr::null_mut();
         self.globals.init();
         self.strings.init();
+
+        self.define_native("clock", native_clock2);
     }
 
     pub fn free(&mut self) {
@@ -967,6 +969,17 @@ impl VM2 {
         self.reset_stack();
     }
 
+    fn define_native(&mut self, name: &str, function: NativeFn2) {
+        self.push(Value2::obj_val(Obj2::copy_string(
+            name.as_bytes(),
+            name.as_bytes().len(),
+        )));
+        self.push(Value2::obj_val(ObjNative2::new(function)));
+        self.globals.set(self.stack[0].as_string(), self.stack[1]);
+        self.pop();
+        self.pop();
+    }
+
     fn push(&mut self, value: Value2) {
         unsafe { *self.stack_top = value };
         self.stack_top = self.stack_top.wrapping_add(1);
@@ -1005,6 +1018,16 @@ impl VM2 {
         if callee.is_obj() {
             match callee.obj_type() {
                 ObjType::Function => return self.call(callee.as_function(), arg_count),
+                ObjType::Native => {
+                    let native = callee.as_native();
+                    let args = unsafe {
+                        std::slice::from_raw_parts_mut(self.stack_top, arg_count as usize)
+                    };
+                    let result = native(arg_count as usize, args);
+                    self.stack_top = self.stack_top.wrapping_sub(arg_count as usize + 1);
+                    self.push(result);
+                    return true;
+                }
                 ObjType::String => { /* Non-Callable Object Type */ }
             }
         }

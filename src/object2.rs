@@ -1,4 +1,5 @@
 use std::fmt::Display;
+use std::time::SystemTime;
 
 use crate::chunk::Chunk2;
 use crate::memory::reallocate;
@@ -25,6 +26,7 @@ fn allocate_object(size: usize, type_: ObjType) -> *mut Obj2 {
 pub enum ObjType {
     String,
     Function,
+    Native,
 }
 
 #[repr(C)]
@@ -124,6 +126,32 @@ impl ObjFunction {
             (*function).chunk.init();
         }
         function
+    }
+}
+
+pub fn native_clock2(_arg_count: usize, _args: &[Value2]) -> Value2 {
+    match SystemTime::now().duration_since(SystemTime::UNIX_EPOCH) {
+        Ok(n) => Value2::number_val(n.as_secs_f64()),
+        Err(e) => panic!("{e}"),
+    }
+}
+
+pub type NativeFn2 = fn(arg_count: usize, args: &[Value2]) -> Value2;
+
+#[repr(C)]
+pub struct ObjNative2 {
+    obj: Obj2,
+    pub function: NativeFn2,
+}
+
+impl ObjNative2 {
+    pub fn new(function: NativeFn2) -> *mut Self {
+        let native = ALLOCATE_OBJ!(ObjNative2, ObjType::Native);
+        unsafe {
+            (*native).function = function;
+        }
+
+        native
     }
 }
 
