@@ -4,7 +4,7 @@ use std::{
 };
 
 use crate::{
-    object2::{Obj2, ObjFunction, ObjNative2, ObjString, ObjType},
+    object2::{Obj2, ObjClosure2, ObjFunction, ObjNative2, ObjString, ObjType},
     VM,
 };
 
@@ -116,6 +116,9 @@ fn free_object(object: *mut Obj2) {
             }
             ObjType::Native => {
                 FREE!(ObjNative2, object);
+            }
+            ObjType::Closure => {
+                FREE!(ObjClosure2, object);
             }
         }
     }

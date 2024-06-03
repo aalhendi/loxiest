@@ -27,6 +27,7 @@ pub enum ObjType {
     String,
     Function,
     Native,
+    Closure,
 }
 
 #[repr(C)]
@@ -152,6 +153,23 @@ impl ObjNative2 {
         }
 
         native
+    }
+}
+
+#[repr(C)]
+pub struct ObjClosure2 {
+    obj: Obj2,
+    pub function: *mut ObjFunction,
+}
+
+impl ObjClosure2 {
+    pub fn new(function: *mut ObjFunction) -> *mut Self {
+        let closure = ALLOCATE_OBJ!(ObjClosure2, ObjType::Closure);
+        unsafe {
+            (*closure).function = function;
+        }
+
+        closure
     }
 }
 

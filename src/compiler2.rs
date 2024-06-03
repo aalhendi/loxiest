@@ -537,7 +537,7 @@ impl Parser {
         let function = self.end_compiler();
         let val = Value2::obj_val(function);
         let constant = self.make_constant(val);
-        self.emit_bytes(OpCode::Constant, constant.into());
+        self.emit_bytes(OpCode::Closure, constant.into());
     }
 
     fn grouping(&mut self) {

@@ -15,7 +15,9 @@ use crate::{
         native_clock, NativeFn, Obj, ObjBoundMethod, ObjClass, ObjClosure, ObjInstance, ObjNative,
         ObjUpvalue,
     },
-    object2::{native_clock2, NativeFn2, Obj2, ObjFunction, ObjNative2, ObjString, ObjType},
+    object2::{
+        native_clock2, NativeFn2, Obj2, ObjClosure2, ObjFunction, ObjNative2, ObjString, ObjType,
+    },
     table::Table,
     value::{Value, Value2},
     ALLOCATE,
@@ -672,7 +674,7 @@ impl VM {
 }
 
 pub struct CallFrame2 {
-    pub function: *mut ObjFunction,
+    pub closure: *mut ObjClosure2,
     pub ip: *mut u8,
     pub slots: *mut Value2,
 }
@@ -728,7 +730,7 @@ impl VM2 {
         let constant_index = self.READ_BYTE() as usize;
         let frame = self.get_frame();
         unsafe {
-            *(*(*frame).function)
+            *(*(*(*frame).closure).function)
                 .chunk
                 .constants
                 .values
@@ -765,12 +767,14 @@ impl VM2 {
                 println!(); // newline
                 let frame = self.get_frame();
                 let offset = unsafe {
-                    let chunk_code_ptr = (*(*frame).function).chunk.code;
+                    let chunk_code_ptr = (*(*(*frame).closure).function).chunk.code;
                     let ip_ptr = (*frame).ip;
                     ip_ptr.offset_from(chunk_code_ptr) as usize
                 };
                 unsafe {
-                    (*(*frame).function).chunk.disassemble_instruction(offset);
+                    (*(*(*frame).closure).function)
+                        .chunk
+                        .disassemble_instruction(offset);
                 }
             }
 
@@ -808,6 +812,11 @@ impl VM2 {
                     if !self.call_value(value, arg_count) {
                         return Err(InterpretResult::RuntimeError);
                     }
+                }
+                OpCode::Closure => {
+                    let function = self.READ_CONSTANT().as_function();
+                    let closure = ObjClosure2::new(function);
+                    self.push(Value2::obj_val(closure));
                 }
                 OpCode::Return => {
                     let result = self.pop();
@@ -914,13 +923,16 @@ impl VM2 {
     }
 
     pub fn interpret(&mut self, source: String) -> Result<(), InterpretResult> {
-        let funciton = compile(source);
-        if funciton.is_null() {
+        let function = compile(source);
+        if function.is_null() {
             return Err(InterpretResult::CompileError);
         }
 
-        self.push(Value2::obj_val(funciton));
-        self.call(funciton, 0);
+        self.push(Value2::obj_val(function));
+        let closure = ObjClosure2::new(function);
+        self.pop();
+        self.push(Value2::obj_val(closure));
+        self.call(closure, 0);
 
         self.run()
     }
@@ -953,7 +965,7 @@ impl VM2 {
 
         for i in (0..=self.frame_count - 1).rev() {
             let frame = &self.frames[i];
-            let function = frame.function;
+            let function = unsafe { (*frame.closure).function };
             let instruction = unsafe { frame.ip as usize - (*function).chunk.code as usize - 1 };
             let line = unsafe { *((*function).chunk.lines.wrapping_add(instruction)) };
             let name = unsafe {
@@ -994,8 +1006,8 @@ impl VM2 {
         unsafe { *self.stack_top.offset(-1 - distance) }
     }
 
-    fn call(&mut self, function: *mut ObjFunction, arg_count: u8) -> bool {
-        let arity = unsafe { (*function).arity } as u8;
+    fn call(&mut self, closure: *mut ObjClosure2, arg_count: u8) -> bool {
+        let arity = unsafe { (*(*closure).function).arity } as u8;
         if arg_count != arity {
             self.runtime_error(&format!("Expected {arity} arguments but got {arg_count}"));
             return false;
@@ -1008,8 +1020,8 @@ impl VM2 {
 
         let frame = &mut self.frames[self.frame_count];
         self.frame_count += 1;
-        frame.function = function;
-        frame.ip = unsafe { (*function).chunk.code };
+        frame.closure = closure;
+        frame.ip = unsafe { (*(*closure).function).chunk.code };
         frame.slots = unsafe { self.stack_top.offset(-(arg_count as isize) - 1) };
         true
     }
@@ -1017,7 +1029,8 @@ impl VM2 {
     fn call_value(&mut self, callee: Value2, arg_count: u8) -> bool {
         if callee.is_obj() {
             match callee.obj_type() {
-                ObjType::Function => return self.call(callee.as_function(), arg_count),
+                ObjType::Closure => return self.call(callee.as_closure(), arg_count),
+                ObjType::Function => unreachable!("Bare ObjFunction calls are not implemented. ObjFunctions are always wrapped in ObjClosures."),
                 ObjType::Native => {
                     let native = callee.as_native();
                     let args = unsafe {

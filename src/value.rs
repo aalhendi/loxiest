@@ -9,7 +9,7 @@ use std::{
 
 use crate::{
     memory::reallocate,
-    object2::{Obj2, ObjFunction, ObjNative2, ObjString, ObjType},
+    object2::{Obj2, ObjClosure2, ObjFunction, ObjNative2, ObjString, ObjType},
     FREE_ARRAY,
 };
 use crate::{
@@ -75,6 +75,28 @@ impl Display for Value2 {
                     write!(f, ">",)
                 },
                 ObjType::Native => write!(f, "<native fn>"),
+                ObjType::Closure => {
+                    // TODO(aalhendi): Refactor
+                    unsafe {
+                        let func = (*self.as_closure()).function;
+                        let name_ptr = (*func).name;
+                        if name_ptr.is_null() {
+                            return write!(f, "<script>");
+                        }
+
+                        write!(f, "<fn ")?;
+                        let str_ptr = (*name_ptr).chars;
+                        let mut i = 0;
+                        loop {
+                            if (*str_ptr.offset(i)) == b'\0' {
+                                break;
+                            }
+                            write!(f, "{}", (*str_ptr.offset(i)) as char)?;
+                            i += 1;
+                        }
+                        write!(f, ">",)
+                    }
+                }
             },
         }
     }
@@ -154,6 +176,14 @@ impl Value2 {
         unsafe {
             debug_assert!((*self.as_obj()).obj_type() == ObjType::Native);
             (*std::mem::transmute::<*mut Obj2, *mut ObjNative2>(self.as_obj())).function
+        }
+    }
+
+    pub fn as_closure(&self) -> *mut ObjClosure2 {
+        debug_assert!(self.type_ == ValueType::Obj);
+        unsafe {
+            debug_assert!((*self.as_obj()).obj_type() == ObjType::Closure);
+            std::mem::transmute(self.as_obj())
         }
     }
 

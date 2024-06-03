@@ -258,30 +258,16 @@ impl Chunk2 {
             // OpCode::Invoke | OpCode::SuperInvoke => self.invoke_instruction(instruction, offset),
             OpCode::Invoke | OpCode::SuperInvoke => todo!(),
 
-            OpCode::Closure => todo!(), // OpCode::Closure => {
-                                        //     let mut idx = offset + 1;
-                                        //     let constant_idx = self.code[idx] as usize;
-                                        //     print!("{name:-16} {constant_idx:4} ", name = "OP_CLOSURE");
-                                        //     self.constants.print_value(constant_idx, None);
+            OpCode::Closure => {
+                let mut idx = offset + 1;
+                let constant_idx = unsafe { *self.code.wrapping_add(idx) as usize };
+                idx += 1;
+                print!("{name:-16} {constant_idx:4} ", name = "OP_CLOSURE");
+                let value = unsafe { *self.constants.values.wrapping_add(constant_idx) };
+                self.constants.print_value(value, Some('\n'));
 
-                                        //     let c = self.constants.values[constant_idx].as_closure();
-                                        //     idx += 1;
-                                        //     for _ in 0..c.function.upvalue_count {
-                                        //         let is_local = if self.code[idx] == 0 {
-                                        //             "upvalue"
-                                        //         } else {
-                                        //             "local"
-                                        //         };
-                                        //         idx += 1;
-                                        //         let index = self.code[idx];
-                                        //         idx += 1;
-                                        //         println!(
-                                        //             "{:04}      |                     {is_local} {index}",
-                                        //             idx - 2
-                                        //         );
-                                        //     }
-                                        //     idx
-                                        // }
+                idx
+            }
         }
     }
 
