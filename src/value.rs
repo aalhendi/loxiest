@@ -97,6 +97,10 @@ impl Display for Value2 {
                         write!(f, ">",)
                     }
                 }
+                // Upvalues exist only to take advantage VM’s memory management.
+                // They aren’t first-class values that a Lox user can directly access in a program
+                // Unreachable (?)
+                ObjType::Upvalue => write!(f, "upvalue"),
             },
         }
     }

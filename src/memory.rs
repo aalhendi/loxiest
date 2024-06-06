@@ -4,7 +4,7 @@ use std::{
 };
 
 use crate::{
-    object2::{Obj2, ObjClosure2, ObjFunction, ObjNative2, ObjString, ObjType},
+    object2::{Obj2, ObjClosure2, ObjFunction, ObjNative2, ObjString, ObjType, ObjUpvalue2},
     VM,
 };
 
@@ -118,7 +118,16 @@ fn free_object(object: *mut Obj2) {
                 FREE!(ObjNative2, object);
             }
             ObjType::Closure => {
+                let closure = object as *mut ObjClosure2;
+                FREE_ARRAY!(
+                    *mut ObjUpvalue2,
+                    (*closure).upvalues,
+                    (*closure).upvalue_count as usize
+                );
                 FREE!(ObjClosure2, object);
+            }
+            ObjType::Upvalue => {
+                FREE!(ObjUpvalue2, object);
             }
         }
     }

@@ -17,6 +17,7 @@ use crate::{
     },
     object2::{
         native_clock2, NativeFn2, Obj2, ObjClosure2, ObjFunction, ObjNative2, ObjString, ObjType,
+        ObjUpvalue2,
     },
     table::Table,
     value::{Value, Value2},
@@ -687,13 +688,15 @@ pub struct VM2 {
     stack_top: *mut Value2,
     pub globals: Table,
     pub strings: Table,
-    pub objects: *mut Obj2, // Intrusive linked list head
+    pub open_upvalues: *mut ObjUpvalue2, // Intrusive linked list
+    pub objects: *mut Obj2,              // Intrusive linked list head
 }
 
 impl VM2 {
     fn reset_stack(&mut self) {
         self.stack_top = self.stack.as_mut_ptr();
         self.frame_count = 0;
+        self.open_upvalues = std::ptr::null_mut();
     }
 
     pub fn init(&mut self) {
@@ -817,10 +820,33 @@ impl VM2 {
                     let function = self.READ_CONSTANT().as_function();
                     let closure = ObjClosure2::new(function);
                     self.push(Value2::obj_val(closure));
+                    for i in 0..unsafe { (*closure).upvalue_count } {
+                        let is_local = self.READ_BYTE();
+                        let index = self.READ_BYTE();
+                        if is_local != 0 {
+                            unsafe {
+                                let local = (*self.get_frame()).slots.wrapping_add(index as usize);
+                                *(*closure).upvalues.wrapping_add(i as usize) =
+                                    self.capture_upvalue(local);
+                            }
+                        } else {
+                            unsafe {
+                                *(*closure).upvalues.wrapping_add(i as usize) =
+                                    *(*(*self.get_frame()).closure)
+                                        .upvalues
+                                        .wrapping_add(index as usize);
+                            }
+                        }
+                    }
+                }
+                OpCode::CloseUpvalue => {
+                    self.close_upvalues(self.stack_top.wrapping_sub(1));
+                    self.pop();
                 }
                 OpCode::Return => {
                     let result = self.pop();
                     let old_frame = self.get_frame();
+                    self.close_upvalues(unsafe { (*old_frame).slots });
                     self.frame_count -= 1;
                     if self.frame_count == 0 {
                         self.pop();
@@ -888,6 +914,20 @@ impl VM2 {
                             let name_deref = &*name;
                             self.runtime_error(&format!("Undefined variable '{name_deref}'."));
                         }
+                    }
+                }
+                OpCode::GetUpvalue => {
+                    let slot = self.READ_BYTE() as usize;
+                    let v = unsafe {
+                        *(*(*(*(*self.get_frame()).closure).upvalues.wrapping_add(slot))).location
+                    };
+                    self.push(v);
+                }
+                OpCode::SetUpvalue => {
+                    let slot = self.READ_BYTE() as usize;
+                    unsafe {
+                        *(*(*(*(*self.get_frame()).closure).upvalues.wrapping_add(slot)))
+                            .location = self.peek(0);
                     }
                 }
                 OpCode::Equal => {
@@ -1041,11 +1081,46 @@ impl VM2 {
                     self.push(result);
                     return true;
                 }
-                ObjType::String => { /* Non-Callable Object Type */ }
+                ObjType::String | ObjType::Upvalue => { /* Non-Callable Object Type */ }
             }
         }
 
         self.runtime_error("Can only call funcitons and classes.");
         false
+    }
+
+    fn capture_upvalue(&mut self, local: *mut Value2) -> *mut ObjUpvalue2 {
+        let mut prev_upvalue = std::ptr::null_mut();
+        let mut upvalue = self.open_upvalues;
+        while !upvalue.is_null() && unsafe { (*upvalue).location > local } {
+            prev_upvalue = upvalue;
+            upvalue = unsafe { (*upvalue).next };
+        }
+
+        if !upvalue.is_null() && unsafe { (*upvalue).location == local } {
+            return upvalue;
+        }
+
+        let created_upvalue = ObjUpvalue2::new(local);
+        unsafe { (*created_upvalue).next = upvalue };
+
+        if prev_upvalue.is_null() {
+            self.open_upvalues = created_upvalue;
+        } else {
+            unsafe { (*prev_upvalue).next = created_upvalue };
+        }
+
+        created_upvalue
+    }
+
+    fn close_upvalues(&mut self, last: *mut Value2) {
+        while !self.open_upvalues.is_null() && unsafe { (*self.open_upvalues).location >= last } {
+            let upvalue = self.open_upvalues;
+            unsafe {
+                (*upvalue).closed = *(*upvalue).location;
+                (*upvalue).location = &mut (*upvalue).closed;
+                self.open_upvalues = (*upvalue).next;
+            }
+        }
     }
 }

@@ -184,6 +184,50 @@ impl Parser {
         -1
     }
 
+    fn add_upvalue(&mut self, compiler: *mut Compiler2, index: u8, is_local: bool) -> isize {
+        unsafe {
+            let upvalue_count = (*(*compiler).function).upvalue_count as usize;
+
+            for i in 0..upvalue_count {
+                let upvalue = &(*compiler).upvalues[i];
+                if upvalue.index == index && upvalue.is_local == is_local {
+                    return i as isize;
+                }
+            }
+
+            if upvalue_count == u8::MAX as usize + 1 {
+                self.error("Too many closure variables in one funciton");
+                return 0;
+            }
+
+            (*compiler).upvalues[upvalue_count].is_local = is_local;
+            (*compiler).upvalues[upvalue_count].index = index;
+            (*(*compiler).function).upvalue_count += 1;
+            upvalue_count as isize
+        }
+    }
+
+    fn resolve_upvalue(&mut self, compiler: *mut Compiler2, name: &Token) -> isize {
+        let enclosing = unsafe { (*compiler).enclosing };
+        if enclosing.is_null() {
+            return -1;
+        }
+
+        let local = self.resolve_local(enclosing, name);
+        if local != -1 {
+            unsafe {
+                (*(*compiler).enclosing).locals[local as usize].is_captured = true;
+            }
+            return self.add_upvalue(compiler, local as u8, true);
+        }
+
+        let upvalue = self.resolve_upvalue(enclosing, name);
+        if upvalue != -1 {
+            return self.add_upvalue(compiler, upvalue as u8, false);
+        }
+        -1
+    }
+
     fn add_local(&mut self, name: Token) {
         unsafe {
             if (*CURRENT).local_count == u8::MAX as usize + 1 {
@@ -196,6 +240,7 @@ impl Parser {
 
             local.name = name;
             local.depth = -1;
+            local.is_captured = false;
         }
     }
 
@@ -493,7 +538,11 @@ impl Parser {
             while (*CURRENT).local_count > 0
                 && (*CURRENT).locals[(*CURRENT).local_count - 1].depth > (*CURRENT).scope_depth
             {
-                self.emit_byte(OpCode::Pop); // TODO(aalhendi): OpCode::Pop_n
+                if (*CURRENT).locals[(*CURRENT).local_count - 1].is_captured {
+                    self.emit_byte(OpCode::CloseUpvalue);
+                } else {
+                    self.emit_byte(OpCode::Pop); // TODO(aalhendi): OpCode::Pop_n
+                }
                 (*CURRENT).local_count -= 1;
             }
         }
@@ -538,6 +587,11 @@ impl Parser {
         let val = Value2::obj_val(function);
         let constant = self.make_constant(val);
         self.emit_bytes(OpCode::Closure, constant.into());
+
+        for i in 0..unsafe { (*function).upvalue_count as usize } {
+            self.emit_byte(compiler.upvalues[i].is_local as u8);
+            self.emit_byte(compiler.upvalues[i].index);
+        }
     }
 
     fn grouping(&mut self) {
@@ -581,8 +635,15 @@ impl Parser {
     fn named_variable(&mut self, name: &Token, can_assign: bool) {
         let mut arg = self.resolve_local(unsafe { CURRENT }, name);
 
+        // TODO(aalhendi): refactor
+        #[allow(clippy::blocks_in_conditions)]
         let (get_op, set_op) = if arg != -1 {
             (OpCode::GetLocal, OpCode::SetLocal)
+        } else if {
+            arg = self.resolve_upvalue(unsafe { CURRENT }, name);
+            arg != -1
+        } {
+            (OpCode::GetUpvalue, OpCode::SetUpvalue)
         } else {
             arg = self.identifier_constant(name) as isize;
             (OpCode::GetGlobal, OpCode::SetGlobal)
@@ -858,12 +919,19 @@ pub struct Compiler2 {
 
     pub locals: [Local; u8::MAX as usize + 1],
     pub local_count: usize,
+    pub upvalues: [Upvalue; u8::MAX as usize + 1],
     pub scope_depth: isize,
 }
 
 pub struct Local {
     name: Token,
     depth: isize,
+    is_captured: bool,
+}
+
+pub struct Upvalue {
+    index: u8,
+    is_local: bool,
 }
 
 pub fn compile(source: String) -> *mut ObjFunction {
@@ -892,8 +960,16 @@ impl Compiler2 {
                 const DEFAULT: Local = Local {
                     name: Token::undefined(),
                     depth: 0,
+                    is_captured: false,
                 };
                 [DEFAULT; 256]
+            },
+            upvalues: {
+                const DEFAULT: Upvalue = Upvalue {
+                    index: 0,
+                    is_local: false,
+                };
+                [DEFAULT; u8::MAX as usize + 1]
             },
             local_count: 0,
             scope_depth: 0,

@@ -264,7 +264,24 @@ impl Chunk2 {
                 idx += 1;
                 print!("{name:-16} {constant_idx:4} ", name = "OP_CLOSURE");
                 let value = unsafe { *self.constants.values.wrapping_add(constant_idx) };
-                self.constants.print_value(value, Some('\n'));
+                self.constants.print_value(value, None);
+
+                let function =
+                    unsafe { (*self.constants.values.wrapping_add(constant_idx)).as_function() };
+                for _ in 0..unsafe { (*function).upvalue_count } {
+                    let is_local = if unsafe { *self.code.wrapping_add(idx) } == 0 {
+                        "upvalue"
+                    } else {
+                        "local"
+                    };
+                    idx += 1;
+                    let index = unsafe { *self.code.wrapping_add(idx) };
+                    idx += 1;
+                    println!(
+                        "{:04}      |                     {is_local} {index}",
+                        idx - 2
+                    );
+                }
 
                 idx
             }
