@@ -10,7 +10,9 @@ edition = "2021"
 [features]
 debug-trace-execution = []
 debug-print-code = []
-default = ["debug-trace-execution", "debug-print-code"]
+debug-stress-gc = []
+debug-log-gc = []
+default = ["debug-trace-execution", "debug-print-code", "debug-log-gc", "debug-stress-gc"]
 
 [profile.release]
 debug = true

@@ -16,9 +16,15 @@ fn allocate_object(size: usize, type_: ObjType) -> *mut Obj2 {
     let object = reallocate(std::ptr::null_mut(), 0, size) as *mut Obj2;
     unsafe {
         (*object).type_ = type_;
+        (*object).is_marked = false;
         (*object).next = VM.objects;
         VM.objects = object;
+        #[cfg(feature = "debug-log-gc")]
+        {
+            println!("{object:p} allocate {size} for {type_:?}");
+        }
     }
+
     object
 }
 
@@ -34,6 +40,7 @@ pub enum ObjType {
 #[repr(C)]
 pub struct Obj2 {
     pub type_: ObjType,
+    pub is_marked: bool,
     pub next: *mut Obj2,
 }
 
@@ -70,7 +77,7 @@ impl Obj2 {
 pub struct ObjString {
     // Given an ObjString*, you can safely cast it to Obj* and then access the type field from it.
     // Given an Obj*, you can “downcast” it to an ObjString*. MUST ensure Obj* ptr points to obj field an actual ObjString
-    obj: Obj2,
+    pub obj: Obj2,
     pub length: isize,
     pub chars: *mut u8,
     pub hash: u32,
@@ -92,7 +99,9 @@ impl ObjString {
             (*string).length = length as isize;
             (*string).chars = chars;
             (*string).hash = hash;
+            VM.push(Value2::obj_val(string));
             VM.strings.set(string, Value2::nil_val());
+            VM.pop();
         }
         string
     }

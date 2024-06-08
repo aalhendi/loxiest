@@ -2,6 +2,7 @@ use std::mem::MaybeUninit;
 
 use crate::{
     chunk::{Chunk, Chunk2, OpCode},
+    memory::mark_object,
     object2::{Obj2, ObjFunction},
     scanner::{self, Scanner},
     token::{Token, TokenType},
@@ -949,6 +950,16 @@ pub fn compile(source: String) -> *mut ObjFunction {
             std::ptr::null_mut()
         } else {
             function
+        }
+    }
+}
+
+pub fn mark_compiler_roots() {
+    unsafe {
+        let mut compiler = CURRENT;
+        while !compiler.is_null() {
+            mark_object((*compiler).function as *mut Obj2);
+            compiler = (*compiler).enclosing;
         }
     }
 }

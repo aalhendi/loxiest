@@ -1,5 +1,8 @@
 use crate::{
-    memory::reallocate, object2::ObjString, value::Value2, ALLOCATE, FREE_ARRAY, GROW_CAPACITY,
+    memory::{mark_object, mark_value, reallocate},
+    object2::{Obj2, ObjString},
+    value::Value2,
+    ALLOCATE, FREE_ARRAY, GROW_CAPACITY,
 };
 
 const TABLE_MAX_LOAD: f64 = 0.75;
@@ -188,5 +191,26 @@ impl Table {
             (*entry).value = Value2::bool_val(true);
         }
         true
+    }
+
+    pub fn mark(&mut self) {
+        for i in 0..self.capacity {
+            unsafe {
+                let entry = self.entries.offset(i);
+                mark_object((*entry).key as *mut Obj2);
+                mark_value((*entry).value);
+            }
+        }
+    }
+
+    pub fn remove_white(&mut self) {
+        for i in 0..self.capacity {
+            unsafe {
+                let entry = self.entries.offset(i);
+                if !(*entry).key.is_null() && !(*(*entry).key).obj.is_marked {
+                    self.delete((*entry).key);
+                }
+            }
+        }
     }
 }

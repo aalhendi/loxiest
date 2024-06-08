@@ -684,12 +684,22 @@ pub struct VM2 {
     frames: [CallFrame2; FRAMES_MAX],
     frame_count: usize,
 
-    stack: [Value2; STACK_MAX],
-    stack_top: *mut Value2,
+    pub stack: [Value2; STACK_MAX],
+    pub stack_top: *mut Value2,
     pub globals: Table,
     pub strings: Table,
     pub open_upvalues: *mut ObjUpvalue2, // Intrusive linked list
-    pub objects: *mut Obj2,              // Intrusive linked list head
+
+    pub bytes_allocated: usize,
+    pub next_gc: usize,
+    pub objects: *mut Obj2, // Intrusive linked list head
+    pub gray_count: usize,
+    pub gray_capacity: usize,
+    // assume full responsibility for this array, including allocation failure.
+    // If we can’t create or grow the gray stack, then we can’t finish the garbage collection.
+    // this is bad news for the VM, but fortunately rare since the gray stack tends to be pretty small
+    // TODO(aalhendi): do something more graceful
+    pub gray_stack: *mut *mut Obj2,
 }
 
 impl VM2 {
@@ -702,6 +712,14 @@ impl VM2 {
     pub fn init(&mut self) {
         self.reset_stack();
         self.objects = std::ptr::null_mut();
+        self.bytes_allocated = 0;
+        // TODO(aalhendi): Tune next_gc and dynamic array initial capacity
+        self.next_gc = 1024 * 1024; // arbitrary - goal is to not trigger the first few GCs too quickly but also to not wait too long.
+
+        self.gray_count = 0;
+        self.gray_capacity = 0;
+        self.gray_stack = std::ptr::null_mut();
+
         self.globals.init();
         self.strings.init();
 
@@ -978,8 +996,8 @@ impl VM2 {
     }
 
     fn concatenate(&mut self) {
-        let b = self.pop().as_string();
-        let a = self.pop().as_string();
+        let b = self.peek(0).as_string();
+        let a = self.peek(1).as_string();
 
         let length = unsafe { (*a).length + (*b).length };
         let chars = ALLOCATE!(u8, length as usize + 1);
@@ -997,6 +1015,8 @@ impl VM2 {
         }
 
         let result = ObjString::take_string(chars, length as usize);
+        self.pop();
+        self.pop();
         self.push(Value2::obj_val(result));
     }
 
@@ -1032,12 +1052,12 @@ impl VM2 {
         self.pop();
     }
 
-    fn push(&mut self, value: Value2) {
+    pub fn push(&mut self, value: Value2) {
         unsafe { *self.stack_top = value };
         self.stack_top = self.stack_top.wrapping_add(1);
     }
 
-    fn pop(&mut self) -> Value2 {
+    pub fn pop(&mut self) -> Value2 {
         self.stack_top = self.stack_top.wrapping_sub(1);
         unsafe { *self.stack_top }
     }
