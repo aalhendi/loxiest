@@ -245,6 +245,21 @@ impl Parser {
         }
     }
 
+    fn class_declaration(&mut self) {
+        self.consume(TokenType::Identifier, "Expect class name.");
+        let class_name = &self.previous.clone();
+        let name_constant = self.identifier_constant(class_name);
+        self.declare_variable();
+
+        self.emit_bytes(OpCode::Class, name_constant.into());
+        self.define_variable(name_constant);
+
+        self.named_variable(class_name, false);
+        self.consume(TokenType::LeftBrace, "Expect '{' before class body.");
+        self.consume(TokenType::RightBrace, "Expect '}' after class body.");
+        // self.emit_byte(OpCode::Pop);
+    }
+
     fn fun_declaration(&mut self) {
         let global = self.parse_variable("Expect function name.");
         self.mark_initialized();
@@ -271,8 +286,7 @@ impl Parser {
 
     fn declaration(&mut self) {
         if self.is_match(&TokenType::Class) {
-            // self.class_declaration();
-            todo!()
+            self.class_declaration();
         } else if self.is_match(&TokenType::Fun) {
             self.fun_declaration();
         } else if self.is_match(&TokenType::Var) {

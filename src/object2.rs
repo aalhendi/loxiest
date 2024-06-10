@@ -3,6 +3,7 @@ use std::time::SystemTime;
 
 use crate::chunk::Chunk2;
 use crate::memory::reallocate;
+use crate::table::Table;
 use crate::value::Value2;
 use crate::{ALLOCATE, FREE_ARRAY, VM};
 
@@ -35,6 +36,8 @@ pub enum ObjType {
     Native,
     Closure,
     Upvalue,
+    Class,
+    Instance,
 }
 
 #[repr(C)]
@@ -211,6 +214,41 @@ impl ObjUpvalue2 {
         }
 
         upvalue
+    }
+}
+
+#[repr(C)]
+pub struct ObjClass2 {
+    obj: Obj2,
+    pub name: *mut ObjString,
+}
+
+impl ObjClass2 {
+    pub fn new(name: *mut ObjString) -> *mut Self {
+        let class = ALLOCATE_OBJ!(ObjClass2, ObjType::Class);
+        unsafe {
+            (*class).name = name;
+        }
+
+        class
+    }
+}
+
+#[repr(C)]
+pub struct ObjInstance2 {
+    obj: Obj2,
+    pub class: *mut ObjClass2,
+    pub fields: Table,
+}
+
+impl ObjInstance2 {
+    pub fn new(class: *mut ObjClass2) -> *mut Self {
+        let instance = ALLOCATE_OBJ!(ObjInstance2, ObjType::Instance);
+        unsafe {
+            (*instance).class = class;
+        }
+
+        instance
     }
 }
 

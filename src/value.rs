@@ -9,7 +9,9 @@ use std::{
 
 use crate::{
     memory::reallocate,
-    object2::{Obj2, ObjClosure2, ObjFunction, ObjNative2, ObjString, ObjType},
+    object2::{
+        Obj2, ObjClass2, ObjClosure2, ObjFunction, ObjInstance2, ObjNative2, ObjString, ObjType,
+    },
     FREE_ARRAY,
 };
 use crate::{
@@ -101,6 +103,22 @@ impl Display for Value2 {
                 // They aren’t first-class values that a Lox user can directly access in a program
                 // Unreachable (?)
                 ObjType::Upvalue => write!(f, "upvalue"),
+                ObjType::Class => unsafe {
+                    let str_ptr = (*self.as_class()).name;
+                    let chars_ptr = (*str_ptr).chars;
+                    for i in 0..(*str_ptr).length {
+                        write!(f, "{}", (*chars_ptr.offset(i)) as char)?;
+                    }
+                    Ok(())
+                },
+                ObjType::Instance => unsafe {
+                    let str_ptr = (*(*self.as_instance()).class).name;
+                    let chars_ptr = (*str_ptr).chars;
+                    for i in 0..(*str_ptr).length {
+                        write!(f, "{}", (*chars_ptr.offset(i)) as char)?;
+                    }
+                    write!(f, "'s instance",)
+                },
             },
         }
     }
@@ -187,6 +205,22 @@ impl Value2 {
         debug_assert!(self.type_ == ValueType::Obj);
         unsafe {
             debug_assert!((*self.as_obj()).obj_type() == ObjType::Closure);
+            std::mem::transmute(self.as_obj())
+        }
+    }
+
+    pub fn as_class(&self) -> *mut ObjClass2 {
+        debug_assert!(self.type_ == ValueType::Obj);
+        unsafe {
+            debug_assert!((*self.as_obj()).obj_type() == ObjType::Class);
+            std::mem::transmute(self.as_obj())
+        }
+    }
+
+    pub fn as_instance(&self) -> *mut ObjInstance2 {
+        debug_assert!(self.type_ == ValueType::Obj);
+        unsafe {
+            debug_assert!((*self.as_obj()).obj_type() == ObjType::Instance);
             std::mem::transmute(self.as_obj())
         }
     }

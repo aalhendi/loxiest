@@ -16,8 +16,8 @@ use crate::{
         ObjUpvalue,
     },
     object2::{
-        native_clock2, NativeFn2, Obj2, ObjClosure2, ObjFunction, ObjNative2, ObjString, ObjType,
-        ObjUpvalue2,
+        native_clock2, NativeFn2, Obj2, ObjClass2, ObjClosure2, ObjFunction, ObjInstance2,
+        ObjNative2, ObjString, ObjType, ObjUpvalue2,
     },
     table::Table,
     value::{Value, Value2},
@@ -975,6 +975,10 @@ impl VM2 {
                     let v = Value2::bool_val(self.pop().is_falsey());
                     self.push(v)
                 }
+                OpCode::Class => {
+                    let v = Value2::obj_val(ObjClass2::new(self.READ_STRING()));
+                    self.push(v);
+                }
                 _ => todo!(),
             }
         }
@@ -1101,7 +1105,14 @@ impl VM2 {
                     self.push(result);
                     return true;
                 }
-                ObjType::String | ObjType::Upvalue => { /* Non-Callable Object Type */ }
+                ObjType::Class => {
+                    let class = callee.as_class();
+                    unsafe {
+                        *self.stack_top.wrapping_sub(arg_count as usize + 1) = Value2::obj_val(ObjInstance2::new(class));
+                    }
+                    return true;
+                }
+                ObjType::String | ObjType::Upvalue | ObjType::Instance => { /* Non-Callable Object Type */ }
             }
         }
 

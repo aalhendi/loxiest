@@ -5,7 +5,10 @@ use std::{
 
 use crate::{
     compiler2::mark_compiler_roots,
-    object2::{Obj2, ObjClosure2, ObjFunction, ObjNative2, ObjString, ObjType, ObjUpvalue2},
+    object2::{
+        Obj2, ObjClass2, ObjClosure2, ObjFunction, ObjInstance2, ObjNative2, ObjString, ObjType,
+        ObjUpvalue2,
+    },
     value::{Value2, ValueArray2},
     VM,
 };
@@ -18,7 +21,9 @@ pub fn reallocate(
     new_size: usize,
 ) -> *mut std::ffi::c_void {
     unsafe {
-        VM.bytes_allocated = VM.bytes_allocated.wrapping_add(new_size.wrapping_sub(old_size));
+        VM.bytes_allocated = VM
+            .bytes_allocated
+            .wrapping_add(new_size.wrapping_sub(old_size));
     }
     if new_size > old_size {
         #[cfg(feature = "debug-stress-gc")]
@@ -151,6 +156,14 @@ fn free_object(object: *mut Obj2) {
             ObjType::Upvalue => {
                 FREE!(ObjUpvalue2, object);
             }
+            ObjType::Class => {
+                FREE!(ObjClass2, object);
+            }
+            ObjType::Instance => {
+                let instance = object as *mut ObjInstance2;
+                (*instance).fields.free();
+                FREE!(ObjInstance2, object);
+            }
         }
     }
 }
@@ -254,6 +267,15 @@ fn blacken_object(object: *mut Obj2) {
                 }
             }
             ObjType::Upvalue => mark_value((*(object as *mut ObjUpvalue2)).closed),
+            ObjType::Class => {
+                let class = object as *mut ObjClass2;
+                mark_object((*class).name as *mut Obj2);
+            }
+            ObjType::Instance => {
+                let instance = object as *mut ObjInstance2;
+                mark_object((*instance).class as *mut Obj2);
+                (*instance).fields.mark();
+            }
         }
     }
 }
