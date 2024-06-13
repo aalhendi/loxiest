@@ -63,13 +63,12 @@ impl Obj2 {
             }
         }
 
-        let heap_chars = ALLOCATE!(u8, length + 1);
+        let heap_chars = ALLOCATE!(u8, length);
         unsafe {
             // PERF(aalhendi): ghetto memcpy, not sure about perf
             for (idx, c) in chars.iter().enumerate() {
                 (*heap_chars.wrapping_add(idx)) = *c;
             }
-            (*heap_chars.wrapping_add(length)) = b'\0'; // null terminator
         }
 
         ObjString::allocate_string(heap_chars, length, hash)

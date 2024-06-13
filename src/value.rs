@@ -48,15 +48,12 @@ impl Display for Value2 {
             ValueType::Number => write!(f, "{}", self.as_number()),
             ValueType::Obj => match self.obj_type() {
                 ObjType::String => unsafe {
-                    let str_ptr = self.as_cstring();
-                    let mut i = 0;
-                    loop {
-                        if (*str_ptr.offset(i)) == b'\0' {
-                            break Ok(());
-                        }
-                        write!(f, "{}", (*str_ptr.offset(i)) as char)?;
-                        i += 1;
+                    let str_ptr = self.as_string();
+                    let chars_ptr = (*str_ptr).chars;
+                    for i in 0..(*str_ptr).length {
+                        write!(f, "{}", (*chars_ptr.offset(i)) as char)?;
                     }
+                    Ok(())
                 },
                 ObjType::Function => unsafe {
                     let name_ptr = (*self.as_function()).name;
@@ -65,14 +62,9 @@ impl Display for Value2 {
                     }
 
                     write!(f, "<fn ")?;
-                    let str_ptr = (*name_ptr).chars;
-                    let mut i = 0;
-                    loop {
-                        if (*str_ptr.offset(i)) == b'\0' {
-                            break;
-                        }
-                        write!(f, "{}", (*str_ptr.offset(i)) as char)?;
-                        i += 1;
+                    let chars_ptr = (*name_ptr).chars;
+                    for i in 0..(*name_ptr).length {
+                        write!(f, "{}", (*chars_ptr.offset(i)) as char)?;
                     }
                     write!(f, ">",)
                 },
@@ -87,14 +79,9 @@ impl Display for Value2 {
                         }
 
                         write!(f, "<fn ")?;
-                        let str_ptr = (*name_ptr).chars;
-                        let mut i = 0;
-                        loop {
-                            if (*str_ptr.offset(i)) == b'\0' {
-                                break;
-                            }
-                            write!(f, "{}", (*str_ptr.offset(i)) as char)?;
-                            i += 1;
+                        let chars_ptr = (*name_ptr).chars;
+                        for i in 0..(*name_ptr).length {
+                            write!(f, "{}", (*chars_ptr.offset(i)) as char)?;
                         }
                         write!(f, ">",)
                     }

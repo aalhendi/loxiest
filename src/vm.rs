@@ -1004,7 +1004,7 @@ impl VM2 {
         let a = self.peek(1).as_string();
 
         let length = unsafe { (*a).length + (*b).length };
-        let chars = ALLOCATE!(u8, length as usize + 1);
+        let chars = ALLOCATE!(u8, length as usize);
         // PERF(aalhendi): ghetto memcpy, not sure about perf
         unsafe {
             for idx in 0..(*a).length {
@@ -1014,8 +1014,6 @@ impl VM2 {
             for idx in 0..(*b).length {
                 (*chars.offset((*a).length + idx)) = *(*b).chars.offset(idx);
             }
-
-            (*chars.offset(length)) = b'\0';
         }
 
         let result = ObjString::take_string(chars, length as usize);
