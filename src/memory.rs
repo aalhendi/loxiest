@@ -157,6 +157,8 @@ fn free_object(object: *mut Obj2) {
                 FREE!(ObjUpvalue2, object);
             }
             ObjType::Class => {
+                let class = object as *mut ObjClass2;
+                (*class).methods.free();
                 FREE!(ObjClass2, object);
             }
             ObjType::Instance => {
@@ -270,6 +272,7 @@ fn blacken_object(object: *mut Obj2) {
             ObjType::Class => {
                 let class = object as *mut ObjClass2;
                 mark_object((*class).name as *mut Obj2);
+                (*class).methods.mark();
             }
             ObjType::Instance => {
                 let instance = object as *mut ObjInstance2;

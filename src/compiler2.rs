@@ -256,8 +256,11 @@ impl Parser {
 
         self.named_variable(class_name, false);
         self.consume(TokenType::LeftBrace, "Expect '{' before class body.");
+        while !self.check(&TokenType::RightBrace) && !self.check(&TokenType::Eof) {
+            self.method();
+        }
         self.consume(TokenType::RightBrace, "Expect '}' after class body.");
-        // self.emit_byte(OpCode::Pop);
+        self.emit_byte(OpCode::Pop);
     }
 
     fn fun_declaration(&mut self) {
@@ -609,6 +612,15 @@ impl Parser {
         }
     }
 
+    fn method(&mut self) {
+        self.consume(TokenType::Identifier, "Expect method name.");
+        let constant = self.identifier_constant(&self.previous.clone());
+
+        let type_ = FunctionType::Function;
+        self.function(type_);
+        self.emit_bytes(OpCode::Method.into(), constant);
+    }
+
     fn grouping(&mut self) {
         self.expression();
         self.consume(TokenType::RightParen, "Expect ')' after expression.")
@@ -622,6 +634,22 @@ impl Parser {
             TokenType::Bang => self.emit_byte(OpCode::Not),
             TokenType::Minus => self.emit_byte(OpCode::Negate),
             _ => unreachable!(),
+        }
+    }
+
+    fn dot(&mut self, can_assign: bool) {
+        self.consume(TokenType::Identifier, "Expect property name after '.'.");
+        let name = self.identifier_constant(&self.previous.clone());
+
+        if can_assign && self.is_match(&TokenType::Equal) {
+            self.expression();
+            self.emit_bytes(OpCode::SetProperty as u8, name);
+        } else if self.is_match(&TokenType::LeftParen) {
+            let arg_count = self.argument_list();
+            self.emit_bytes(OpCode::Invoke as u8, name);
+            self.emit_byte(arg_count);
+        } else {
+            self.emit_bytes(OpCode::GetProperty as u8, name);
         }
     }
 
@@ -786,7 +814,11 @@ impl Parser {
             LeftBrace => ParseRule::new(None, None, Precedence::None),
             RightBrace => ParseRule::new(None, None, Precedence::None),
             Comma => ParseRule::new(None, None, Precedence::None),
-            Dot => ParseRule::new(None, None, Precedence::None),
+            Dot => ParseRule::new(
+                None,
+                Some(|c, can_assign| c.dot(can_assign)),
+                Precedence::Call,
+            ),
             Minus => ParseRule::new(
                 Some(|c, _can_assign| c.unary()),
                 Some(|c, can_assign| c.binary(can_assign)),

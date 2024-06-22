@@ -220,6 +220,7 @@ impl ObjUpvalue2 {
 pub struct ObjClass2 {
     obj: Obj2,
     pub name: *mut ObjString,
+    pub methods: Table,
 }
 
 impl ObjClass2 {
@@ -227,6 +228,7 @@ impl ObjClass2 {
         let class = ALLOCATE_OBJ!(ObjClass2, ObjType::Class);
         unsafe {
             (*class).name = name;
+            (*class).methods.init();
         }
 
         class

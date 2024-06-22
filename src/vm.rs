@@ -948,6 +948,37 @@ impl VM2 {
                             .location = self.peek(0);
                     }
                 }
+                OpCode::SetProperty => {
+                    if !self.peek(1).is_instance() {
+                        self.runtime_error("Only instances have fields.");
+                        return Err(InterpretResult::RuntimeError);
+                    }
+
+                    let instance = self.peek(1).as_instance();
+                    unsafe {
+                        (*instance).fields.set(self.READ_STRING(), self.peek(0));
+                        let value = self.pop();
+                        self.pop();
+                        self.push(value);
+                    }
+                }
+                OpCode::GetProperty => {
+                    if !self.peek(0).is_instance() {
+                        self.runtime_error("Only instances have properties.");
+                        return Err(InterpretResult::RuntimeError);
+                    }
+                    let instance = self.peek(0).as_instance();
+                    let name = self.READ_STRING();
+                    let mut value = unsafe { std::mem::zeroed() };
+                    unsafe {
+                        if (*instance).fields.get(name, &mut value) {
+                            self.pop(); // instance
+                            self.push(value);
+                        } else {
+                            self.runtime_error(&format!("Undefined property '{}'.", *name));
+                        }
+                    }
+                }
                 OpCode::Equal => {
                     let b = self.pop();
                     let a = self.pop();
@@ -978,6 +1009,10 @@ impl VM2 {
                 OpCode::Class => {
                     let v = Value2::obj_val(ObjClass2::new(self.READ_STRING()));
                     self.push(v);
+                }
+                OpCode::Method => {
+                    let name = self.READ_STRING();
+                    self.define_method(name);
                 }
                 _ => todo!(),
             }
@@ -1151,5 +1186,14 @@ impl VM2 {
                 self.open_upvalues = (*upvalue).next;
             }
         }
+    }
+
+    fn define_method(&mut self, name: *mut ObjString) {
+        let method = self.peek(0);
+        let class = self.peek(1).as_class();
+        unsafe {
+            (*class).methods.set(name, method);
+        }
+        self.pop();
     }
 }

@@ -232,6 +232,10 @@ impl Value2 {
         self.is_obj_type(ObjType::String)
     }
 
+    pub fn is_instance(&self) -> bool {
+        self.is_obj_type(ObjType::Instance)
+    }
+
     pub fn obj_type(&self) -> ObjType {
         debug_assert!(self.type_ == ValueType::Obj);
         unsafe { (*self.as_obj()).obj_type() }
