@@ -30,39 +30,6 @@ impl Table {
         self.init();
     }
 
-    // NOTE(aalhendi): might have to move this as own fn if GC breaks.
-    fn adjust_capcity(&mut self, capacity: isize) {
-        let entries = ALLOCATE!(Entry, capacity as usize);
-        for i in 0..capacity {
-            unsafe {
-                (*entries.offset(i)).key = std::ptr::null_mut();
-                (*entries.offset(i)).value = Value::nil_val();
-            }
-        }
-
-        self.count = 0;
-        let mut i = 0;
-        while i < self.capacity {
-            unsafe {
-                let entry = self.entries.offset(i);
-                if (*entry).key.is_null() {
-                    i += 1;
-                    continue;
-                }
-
-                let dst = self.find_entry((*entry).key);
-                (*dst).key = (*entry).key;
-                (*dst).value = (*entry).value;
-                self.count += 1;
-            }
-            i += 1;
-        }
-
-        FREE_ARRAY!(Entry, self.entries, self.capacity as usize);
-        self.entries = entries;
-        self.capacity = capacity;
-    }
-
     fn find_entry(&mut self, key: *mut ObjString) -> *mut Entry {
         unsafe {
             let mut index: u32 = (*key).hash % self.capacity as u32;
@@ -113,6 +80,51 @@ impl Table {
         }
     }
 
+    pub fn get(&mut self, key: *mut ObjString) -> Option<Value> {
+        if self.count == 0 {
+            return None;
+        }
+
+        let entry = self.find_entry(key);
+        unsafe {
+            if (*entry).key.is_null() {
+                return None;
+            }
+
+            Some((*entry).value)
+        }
+    }
+
+    // NOTE(aalhendi): might have to move this as own fn if GC breaks.
+    fn adjust_capcity(&mut self, capacity: isize) {
+        let entries = ALLOCATE!(Entry, capacity as usize);
+        for i in 0..capacity {
+            unsafe {
+                (*entries.offset(i)).key = std::ptr::null_mut();
+                (*entries.offset(i)).value = Value::nil_val();
+            }
+        }
+
+        self.count = 0;
+        for i in 0..self.capacity {
+            unsafe {
+                let entry = self.entries.offset(i);
+                if (*entry).key.is_null() {
+                    continue;
+                }
+
+                let dst = self.find_entry((*entry).key);
+                (*dst).key = (*entry).key;
+                (*dst).value = (*entry).value;
+                self.count += 1;
+            }
+        }
+
+        FREE_ARRAY!(Entry, self.entries, self.capacity as usize);
+        self.entries = entries;
+        self.capacity = capacity;
+    }
+
     pub fn set(&mut self, key: *mut ObjString, value: Value) -> bool {
         if self.count + 1 > (self.capacity as f64 * TABLE_MAX_LOAD) as isize {
             let capacity = GROW_CAPACITY!(self.capacity);
@@ -130,6 +142,24 @@ impl Table {
 
             is_new_key
         }
+    }
+
+    pub fn delete(&mut self, key: *mut ObjString) -> bool {
+        if self.count == 0 {
+            return false;
+        }
+
+        let entry = self.find_entry(key);
+        unsafe {
+            if (*entry).key.is_null() {
+                return false;
+            }
+
+            // Place a tombstone in the entry.
+            (*entry).key = std::ptr::null_mut();
+            (*entry).value = Value::bool_val(true);
+        }
+        true
     }
 
     pub fn add_all(from: *mut Table, to: *mut Table) {
@@ -178,40 +208,15 @@ impl Table {
         }
     }
 
-    // TODO(aalhendi): consider making this an Option<Value2> return type
-    /// value is an outptr
-    pub fn get(&mut self, key: *mut ObjString, value: &mut Value) -> bool {
-        if self.count == 0 {
-            return false;
-        }
-
-        let entry = self.find_entry(key);
-        unsafe {
-            if (*entry).key.is_null() {
-                return false;
+    pub fn remove_white(&mut self) {
+        for i in 0..self.capacity {
+            unsafe {
+                let entry = self.entries.offset(i);
+                if !(*entry).key.is_null() && !(*(*entry).key).obj.is_marked {
+                    self.delete((*entry).key);
+                }
             }
-
-            *value = (*entry).value;
         }
-        true
-    }
-
-    pub fn delete(&mut self, key: *mut ObjString) -> bool {
-        if self.count == 0 {
-            return false;
-        }
-
-        let entry = self.find_entry(key);
-        unsafe {
-            if (*entry).key.is_null() {
-                return false;
-            }
-
-            // Place a tombstone in the entry.
-            (*entry).key = std::ptr::null_mut();
-            (*entry).value = Value::bool_val(true);
-        }
-        true
     }
 
     pub fn mark(&mut self) {
@@ -220,17 +225,6 @@ impl Table {
                 let entry = self.entries.offset(i);
                 mark_object((*entry).key as *mut Obj);
                 mark_value((*entry).value);
-            }
-        }
-    }
-
-    pub fn remove_white(&mut self) {
-        for i in 0..self.capacity {
-            unsafe {
-                let entry = self.entries.offset(i);
-                if !(*entry).key.is_null() && !(*(*entry).key).obj.is_marked {
-                    self.delete((*entry).key);
-                }
             }
         }
     }

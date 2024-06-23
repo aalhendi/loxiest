@@ -147,37 +147,44 @@ pub struct Chunk {
     capacity: isize,
     pub count: isize,
     pub code: *mut u8,
-    pub lines: *mut isize,
+    pub lines: *mut usize,
     pub constants: ValueArray,
 }
 
 impl Chunk {
-    #[allow(clippy::uninit_assumed_init)]
-    #[allow(invalid_value)]
     pub fn init(&mut self) {
-        self.capacity = 0;
         self.count = 0;
+        self.capacity = 0;
         self.code = null_mut();
         self.lines = null_mut();
-        self.constants = unsafe { MaybeUninit::uninit().assume_init() };
+        self.constants = unsafe { std::mem::zeroed() };
         self.constants.init();
     }
 
-    pub fn write(&mut self, byte: u8, line: isize) {
+    pub fn free(&mut self) {
+        FREE_ARRAY!(u8, self.code, self.capacity as usize);
+        FREE_ARRAY!(usize, self.lines, self.capacity as usize);
+        self.constants.free();
+        self.init();
+    }
+
+    pub fn write(&mut self, byte: u8, line: usize) {
         if self.capacity < self.count + 1 {
             let old_capacity = self.capacity;
             self.capacity = GROW_CAPACITY!(old_capacity);
             self.code = GROW_ARRAY!(u8, self.code, old_capacity as usize, self.capacity as usize);
             self.lines = GROW_ARRAY!(
-                isize,
+                usize,
                 self.lines,
                 old_capacity as usize,
                 self.capacity as usize
             );
         }
 
-        unsafe { *self.code.offset(self.count) = byte };
-        unsafe { *self.lines.offset(self.count) = line };
+        unsafe {
+            *self.code.offset(self.count) = byte;
+            *self.lines.offset(self.count) = line;
+        }
         self.count += 1;
     }
 
@@ -186,13 +193,6 @@ impl Chunk {
         self.constants.write(value);
         unsafe { VM.pop() };
         self.constants.count - 1
-    }
-
-    pub fn free(&mut self) {
-        FREE_ARRAY!(u8, self.code, self.capacity as usize);
-        FREE_ARRAY!(isize, self.lines, self.capacity as usize);
-        self.constants.free();
-        self.init();
     }
 
     #[cfg(any(feature = "debug-trace-execution", feature = "debug-print-code"))]

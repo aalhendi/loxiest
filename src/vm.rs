@@ -297,17 +297,15 @@ impl VM {
                 }
                 OpCode::GetGlobal => {
                     let name = self.READ_STRING();
-                    #[allow(clippy::uninit_assumed_init)]
-                    #[allow(invalid_value)]
-                    let mut value = unsafe { MaybeUninit::uninit().assume_init() };
-                    if !self.globals.get(name, &mut value) {
+                    if let Some(value) = self.globals.get(name) {
+                        self.push(value);
+                    } else {
                         unsafe {
                             let name_deref = &*name;
                             self.runtime_error(&format!("Undefined variable '{name_deref}'."));
                             return Err(InterpretResult::RuntimeError);
                         }
                     }
-                    self.push(value);
                 }
                 OpCode::DefineGlobal => {
                     let name = self.READ_STRING();
@@ -361,14 +359,11 @@ impl VM {
                     }
                     let instance = self.peek(0).as_instance();
                     let name = self.READ_STRING();
-                    let mut value = unsafe { std::mem::zeroed() };
-                    unsafe {
-                        if (*instance).fields.get(name, &mut value) {
-                            self.pop(); // instance
-                            self.push(value);
-                        } else if !self.bind_method((*instance).class, name) {
-                            return Err(InterpretResult::RuntimeError);
-                        }
+                    if let Some(value) = unsafe { (*instance).fields.get(name) } {
+                        self.pop(); // instance
+                        self.push(value);
+                    } else if !self.bind_method(unsafe { (*instance).class }, name) {
+                        return Err(InterpretResult::RuntimeError);
                     }
                 }
                 OpCode::GetSuper => {
@@ -555,9 +550,8 @@ impl VM {
                     let class = callee.as_class();
                     unsafe {
                         *self.stack_top.wrapping_sub(arg_count as usize + 1) = Value::obj_val(ObjInstance2::new(class));
-                        let mut initalizer = std::mem::zeroed();
-                        if (*class).methods.get(self.init_string, &mut initalizer) {
-                            return self.call(initalizer.as_closure(), arg_count);
+                        if let Some(initializer) = (*class).methods.get(self.init_string) {
+                            return self.call(initializer.as_closure(), arg_count);
                         } else if arg_count != 0 {
                             self.runtime_error(&format!("Expected 0 arguments but got {arg_count}."));
                             return false;
@@ -586,12 +580,12 @@ impl VM {
         arg_count: u8,
     ) -> bool {
         unsafe {
-            let mut method = std::mem::zeroed();
-            if !(*class).methods.get(name, &mut method) {
+            if let Some(method) = (*class).methods.get(name) {
+                self.call(method.as_closure(), arg_count)
+            } else {
                 self.runtime_error(&format!("Undefined property '{}'.", *name));
-                return false;
+                false
             }
-            self.call(method.as_closure(), arg_count)
         }
     }
 
@@ -603,8 +597,7 @@ impl VM {
         }
         let instance = receiver.as_instance();
         unsafe {
-            let mut value = std::mem::zeroed();
-            if (*instance).fields.get(name, &mut value) {
+            if let Some(value) = (*instance).fields.get(name) {
                 *self.stack_top.wrapping_sub(arg_count as usize + 1) = value;
                 return self.call_value(value, arg_count);
             }
@@ -613,17 +606,16 @@ impl VM {
     }
 
     fn bind_method(&mut self, class: *mut ObjClass2, name: *mut ObjString) -> bool {
-        unsafe {
-            let mut method = std::mem::zeroed();
-            if !(*class).methods.get(name, &mut method) {
-                self.runtime_error(&format!("Undefined property '{}'.", *name));
-                return false;
-            }
-
+        if let Some(method) = unsafe { (*class).methods.get(name) } {
             let bound = ObjBoundMethod2::new(self.peek(0), method.as_closure());
             self.pop();
             self.push(Value::obj_val(bound));
             true
+        } else {
+            unsafe {
+                self.runtime_error(&format!("Undefined property '{}'.", *name));
+            }
+            false
         }
     }
 

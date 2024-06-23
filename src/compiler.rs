@@ -120,7 +120,7 @@ impl Parser {
             return;
         }
 
-        self.emit_bytes(OpCode::DefineGlobal, global.into());
+        self.emit_bytes(OpCode::DefineGlobal.into(), global);
     }
 
     fn mark_initialized(&mut self) {
@@ -251,7 +251,7 @@ impl Parser {
         let name_constant = self.identifier_constant(class_name);
         self.declare_variable();
 
-        self.emit_bytes(OpCode::Class, name_constant.into());
+        self.emit_bytes(OpCode::Class.into(), name_constant);
         self.define_variable(name_constant);
 
         let mut class_compiler = ClassCompiler {
@@ -515,7 +515,7 @@ impl Parser {
     }
 
     fn emit_byte<T: Into<u8>>(&mut self, byte: T) {
-        unsafe { (*self.current_chunk()).write(byte.into(), self.previous.line as isize) };
+        unsafe { (*self.current_chunk()).write(byte.into(), self.previous.line) };
     }
 
     fn emit_loop(&mut self, loop_start: isize) {
@@ -640,7 +640,7 @@ impl Parser {
         let function = self.end_compiler();
         let val = Value::obj_val(function);
         let constant = self.make_constant(val);
-        self.emit_bytes(OpCode::Closure, constant.into());
+        self.emit_bytes(OpCode::Closure.into(), constant);
 
         for i in 0..unsafe { (*function).upvalue_count as usize } {
             self.emit_byte(compiler.upvalues[i].is_local as u8);
@@ -742,9 +742,9 @@ impl Parser {
 
         if can_assign && self.is_match(&TokenType::Equal) {
             self.expression();
-            self.emit_bytes(set_op, (arg as u8).into());
+            self.emit_bytes(set_op.into(), arg as u8);
         } else {
-            self.emit_bytes(get_op, (arg as u8).into());
+            self.emit_bytes(get_op.into(), arg as u8);
         }
     }
 
