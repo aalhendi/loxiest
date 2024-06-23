@@ -1,7 +1,7 @@
 use crate::{
     memory::{mark_object, mark_value, reallocate},
-    object2::{Obj2, ObjString},
-    value::Value2,
+    object::{Obj, ObjString},
+    value::Value,
     ALLOCATE, FREE_ARRAY, GROW_CAPACITY,
 };
 
@@ -15,7 +15,7 @@ pub struct Table {
 
 struct Entry {
     key: *mut ObjString,
-    value: Value2,
+    value: Value,
 }
 
 impl Table {
@@ -36,7 +36,7 @@ impl Table {
         for i in 0..capacity {
             unsafe {
                 (*entries.offset(i)).key = std::ptr::null_mut();
-                (*entries.offset(i)).value = Value2::nil_val();
+                (*entries.offset(i)).value = Value::nil_val();
             }
         }
 
@@ -90,11 +90,14 @@ impl Table {
                 // } else if (*entry).key == key {
                 //     // We found the key.
                 //     return entry;
-                } else if (*(*entry).key).length == (*key).length && (*(*entry).key).hash == (*key).hash
+                } else if (*(*entry).key).length == (*key).length
+                    && (*(*entry).key).hash == (*key).hash
                 {
                     let mut is_same = true;
                     for c in 0..(*key).length as usize {
-                        if *((*(*entry).key).chars.wrapping_add(c)) != (*(*key).chars.wrapping_add(c)) {
+                        if *((*(*entry).key).chars.wrapping_add(c))
+                            != (*(*key).chars.wrapping_add(c))
+                        {
                             is_same = false;
                             break;
                         }
@@ -110,7 +113,7 @@ impl Table {
         }
     }
 
-    pub fn set(&mut self, key: *mut ObjString, value: Value2) -> bool {
+    pub fn set(&mut self, key: *mut ObjString, value: Value) -> bool {
         if self.count + 1 > (self.capacity as f64 * TABLE_MAX_LOAD) as isize {
             let capacity = GROW_CAPACITY!(self.capacity);
             self.adjust_capcity(capacity);
@@ -177,7 +180,7 @@ impl Table {
 
     // TODO(aalhendi): consider making this an Option<Value2> return type
     /// value is an outptr
-    pub fn get(&mut self, key: *mut ObjString, value: &mut Value2) -> bool {
+    pub fn get(&mut self, key: *mut ObjString, value: &mut Value) -> bool {
         if self.count == 0 {
             return false;
         }
@@ -206,7 +209,7 @@ impl Table {
 
             // Place a tombstone in the entry.
             (*entry).key = std::ptr::null_mut();
-            (*entry).value = Value2::bool_val(true);
+            (*entry).value = Value::bool_val(true);
         }
         true
     }
@@ -215,7 +218,7 @@ impl Table {
         for i in 0..self.capacity {
             unsafe {
                 let entry = self.entries.offset(i);
-                mark_object((*entry).key as *mut Obj2);
+                mark_object((*entry).key as *mut Obj);
                 mark_value((*entry).value);
             }
         }

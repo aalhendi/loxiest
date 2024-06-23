@@ -4,12 +4,12 @@ use std::{
 };
 
 use crate::{
-    compiler2::mark_compiler_roots,
-    object2::{
-        Obj2, ObjBoundMethod2, ObjClass2, ObjClosure2, ObjFunction, ObjInstance2, ObjNative2,
+    compiler::mark_compiler_roots,
+    object::{
+        Obj, ObjBoundMethod2, ObjClass2, ObjClosure2, ObjFunction, ObjInstance2, ObjNative2,
         ObjString, ObjType, ObjUpvalue2,
     },
-    value::{Value2, ValueArray2},
+    value::{Value, ValueArray},
     VM,
 };
 
@@ -124,7 +124,7 @@ macro_rules! FREE {
     };
 }
 
-fn free_object(object: *mut Obj2) {
+fn free_object(object: *mut Obj) {
     unsafe {
         #[cfg(feature = "debug-log-gc")]
         {
@@ -182,7 +182,7 @@ pub fn free_objects() {
             object = next;
         }
 
-        let layout = Layout::array::<*mut Obj2>(VM.gray_capacity).unwrap();
+        let layout = Layout::array::<*mut Obj>(VM.gray_capacity).unwrap();
         dealloc(VM.gray_stack as *mut u8, layout);
     }
 }
@@ -225,36 +225,36 @@ fn mark_roots() {
 
         let mut upvalue = VM.open_upvalues;
         while !upvalue.is_null() {
-            mark_object(upvalue as *mut Obj2);
+            mark_object(upvalue as *mut Obj);
 
             upvalue = (*upvalue).next;
         }
 
         VM.globals.mark();
         mark_compiler_roots();
-        mark_object(VM.init_string as *mut Obj2);
+        mark_object(VM.init_string as *mut Obj);
     }
 }
 
 // checks if actual heap object and does work
 // numbers, Booleans, and nil are stored directly inline in Value and require no heap allocation
 // gc doesn’t need to worry about them
-pub fn mark_value(value: Value2) {
+pub fn mark_value(value: Value) {
     if value.is_obj() {
         mark_object(value.as_obj());
     }
 }
 
-fn mark_array(array: &mut ValueArray2) {
+fn mark_array(array: &mut ValueArray) {
     for i in 0..array.count {
         mark_value(unsafe { *array.values.offset(i) });
     }
 }
 
-fn blacken_object(object: *mut Obj2) {
+fn blacken_object(object: *mut Obj) {
     #[cfg(feature = "debug-log-gc")]
     {
-        println!("{object:p} blacken {v}", v = Value2::obj_val(object));
+        println!("{object:p} blacken {v}", v = Value::obj_val(object));
     }
 
     unsafe {
@@ -262,37 +262,37 @@ fn blacken_object(object: *mut Obj2) {
             ObjType::String | ObjType::Native => { /* Nothing to traverse */ }
             ObjType::Function => {
                 let function = object as *mut ObjFunction;
-                mark_object((*function).name as *mut Obj2);
+                mark_object((*function).name as *mut Obj);
                 mark_array(&mut (*function).chunk.constants)
             }
             ObjType::Closure => {
                 let closure = object as *mut ObjClosure2;
-                mark_object((*closure).function as *mut Obj2);
+                mark_object((*closure).function as *mut Obj);
                 for i in 0..(*closure).upvalue_count {
-                    mark_object((*closure).upvalues.offset(i) as *mut Obj2);
+                    mark_object((*closure).upvalues.offset(i) as *mut Obj);
                 }
             }
             ObjType::Upvalue => mark_value((*(object as *mut ObjUpvalue2)).closed),
             ObjType::Class => {
                 let class = object as *mut ObjClass2;
-                mark_object((*class).name as *mut Obj2);
+                mark_object((*class).name as *mut Obj);
                 (*class).methods.mark();
             }
             ObjType::Instance => {
                 let instance = object as *mut ObjInstance2;
-                mark_object((*instance).class as *mut Obj2);
+                mark_object((*instance).class as *mut Obj);
                 (*instance).fields.mark();
             }
             ObjType::BoundMethod => {
                 let bound = object as *mut ObjBoundMethod2;
                 mark_value((*bound).reciever);
-                mark_object((*bound).method as *mut Obj2);
+                mark_object((*bound).method as *mut Obj);
             }
         }
     }
 }
 
-pub fn mark_object(object: *mut Obj2) {
+pub fn mark_object(object: *mut Obj) {
     if object.is_null() {
         return;
     }
@@ -303,7 +303,7 @@ pub fn mark_object(object: *mut Obj2) {
 
         #[cfg(feature = "debug-log-gc")]
         {
-            println!("{object:p} mark {v}", v = Value2::obj_val(object));
+            println!("{object:p} mark {v}", v = Value::obj_val(object));
         }
         (*object).is_marked = true;
 
@@ -314,9 +314,9 @@ pub fn mark_object(object: *mut Obj2) {
             // memory for the gray stack itself is not managed by the garbage collector
             VM.gray_stack = realloc(
                 VM.gray_stack as *mut u8,
-                Layout::array::<*mut Obj2>(VM.gray_capacity).unwrap(),
-                std::mem::size_of::<*mut Obj2>() * VM.gray_capacity,
-            ) as *mut *mut Obj2;
+                Layout::array::<*mut Obj>(VM.gray_capacity).unwrap(),
+                std::mem::size_of::<*mut Obj>() * VM.gray_capacity,
+            ) as *mut *mut Obj;
 
             if VM.gray_stack.is_null() {
                 std::process::exit(1);

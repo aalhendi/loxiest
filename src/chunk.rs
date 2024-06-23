@@ -2,7 +2,7 @@ use std::mem::MaybeUninit;
 use std::{fmt::Display, mem, ptr::null_mut};
 
 use crate::memory::reallocate;
-use crate::value::{Value, Value2, ValueArray, ValueArray2};
+use crate::value::{Value, ValueArray};
 use crate::{FREE_ARRAY, GROW_ARRAY, GROW_CAPACITY, VM};
 
 #[derive(Debug)]
@@ -143,15 +143,15 @@ impl From<u8> for OpCode {
     }
 }
 
-pub struct Chunk2 {
+pub struct Chunk {
     capacity: isize,
     pub count: isize,
     pub code: *mut u8,
     pub lines: *mut isize,
-    pub constants: ValueArray2,
+    pub constants: ValueArray,
 }
 
-impl Chunk2 {
+impl Chunk {
     #[allow(clippy::uninit_assumed_init)]
     #[allow(invalid_value)]
     pub fn init(&mut self) {
@@ -181,7 +181,7 @@ impl Chunk2 {
         self.count += 1;
     }
 
-    pub fn add_constant(&mut self, value: Value2) -> isize {
+    pub fn add_constant(&mut self, value: Value) -> isize {
         unsafe { VM.push(value) };
         self.constants.write(value);
         unsafe { VM.pop() };
@@ -333,193 +333,13 @@ impl Chunk2 {
 
     #[cfg(any(feature = "debug-trace-execution", feature = "debug-print-code"))]
     fn invoke_instruction(&self, name: OpCode, offset: usize) -> usize {
-        let constant_idx = unsafe {*self.code.wrapping_add(offset + 1)} as usize;
-        let arg_count = unsafe {*self.code.wrapping_add(offset + 2)} as usize;
+        let constant_idx = unsafe { *self.code.wrapping_add(offset + 1) } as usize;
+        let arg_count = unsafe { *self.code.wrapping_add(offset + 2) } as usize;
         let name = name.to_string();
 
         print!("{name:-16} ({arg_count} args) {constant_idx:4} '");
         let value = unsafe { *self.constants.values.wrapping_add(constant_idx) };
         self.constants.print_value(value, Some('\''));
         offset + 3
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, PartialOrd)]
-pub struct Chunk {
-    pub code: Vec<u8>,
-    pub constants: ValueArray,
-    pub lines: Vec<usize>,
-}
-
-impl Chunk {
-    pub fn new() -> Self {
-        Self {
-            code: Vec::with_capacity(8),
-            constants: ValueArray::new(),
-            lines: Vec::with_capacity(8),
-        }
-    }
-
-    pub fn count(&self) -> usize {
-        self.lines.len()
-    }
-
-    pub fn write_byte<T: Into<u8>>(&mut self, byte: T, line: usize) {
-        self.code.push(byte.into());
-        self.lines.push(line);
-    }
-
-    #[inline]
-    pub fn read_byte(&self, ip_idx: usize) -> u8 {
-        self.code[ip_idx]
-    }
-
-    pub fn add_constant(&mut self, value: Value) -> Option<u8> {
-        self.constants.write(value);
-        u8::try_from(self.constants.values.len() - 1).ok()
-    }
-
-    pub fn free(&mut self) {
-        self.code = Vec::new();
-        self.lines = Vec::new();
-        self.constants.free();
-    }
-
-    #[cfg(any(feature = "debug-trace-execution", feature = "debug-print-code"))]
-    fn simple_instruction(&self, code: OpCode, offset: usize) -> usize {
-        println!("{code}");
-        offset + 1
-    }
-
-    #[cfg(any(feature = "debug-trace-execution", feature = "debug-print-code"))]
-    fn byte_instruction(&self, name: OpCode, offset: usize) -> usize {
-        let slot = self.code[offset + 1];
-        let name = name.to_string();
-        println!("{name:-16} {slot:4}");
-        offset + 2
-    }
-
-    #[cfg(any(feature = "debug-trace-execution", feature = "debug-print-code"))]
-    fn constant_instruction(&self, code: OpCode, offset: usize) -> usize {
-        let constant_idx = self.code[offset + 1] as usize;
-        let name = code.to_string(); // This makes formatting work for some reason
-        print!("{name:-16} {constant_idx:4} '");
-        self.constants.print_value(constant_idx, Some('\''));
-        offset + 2
-    }
-
-    #[cfg(any(feature = "debug-trace-execution", feature = "debug-print-code"))]
-    fn jump_instruction(&self, name: OpCode, is_neg: bool, offset: usize) -> usize {
-        let name = name.to_string();
-        let jump = ((self.code[offset + 1] as u16) << 8) | (self.code[offset + 2] as u16);
-
-        // NOTE: This could underflow and that would be a bug in the impl so it shouldn't.
-        let dst = match is_neg {
-            true => offset + 3 - jump as usize,
-            false => offset + 3 + jump as usize,
-        };
-        println!("{name:-16} {offset:4} -> {dst}",);
-        offset + 3
-    }
-
-    #[cfg(any(feature = "debug-trace-execution", feature = "debug-print-code"))]
-    fn invoke_instruction(&self, name: OpCode, offset: usize) -> usize {
-        let constant_idx = self.code[offset + 1] as usize;
-        let arg_count = self.code[offset + 2] as usize;
-        let name = name.to_string();
-
-        print!("{name:-16} ({arg_count} args) {constant_idx:4} '");
-        self.constants.print_value(constant_idx, Some('\''));
-        offset + 3
-    }
-
-    #[cfg(feature = "debug-print-code")]
-    pub fn disassemble_instruction(&self, offset: usize) -> usize {
-        print!("{offset:04} ");
-
-        if offset > 0 && self.lines[offset] == self.lines[offset - 1] {
-            print!("   | ");
-        } else {
-            print!("{line:4} ", line = self.lines[offset]);
-        }
-
-        let instruction = OpCode::from(self.code[offset]);
-        match instruction {
-            OpCode::Return
-            | OpCode::Negate
-            | OpCode::Add
-            | OpCode::Subtract
-            | OpCode::Multiply
-            | OpCode::Divide
-            | OpCode::False
-            | OpCode::True
-            | OpCode::Nil
-            | OpCode::Not
-            | OpCode::Equal
-            | OpCode::Greater
-            | OpCode::Less
-            | OpCode::Print
-            | OpCode::Pop
-            | OpCode::CloseUpvalue
-            | OpCode::Inherit => self.simple_instruction(instruction, offset),
-
-            OpCode::Constant
-            | OpCode::DefineGlobal
-            | OpCode::GetGlobal
-            | OpCode::SetGlobal
-            | OpCode::Class
-            | OpCode::GetProperty
-            | OpCode::SetProperty
-            | OpCode::Method
-            | OpCode::GetSuper => self.constant_instruction(instruction, offset),
-
-            OpCode::GetLocal
-            | OpCode::SetLocal
-            | OpCode::Call
-            | OpCode::GetUpvalue
-            | OpCode::SetUpvalue => self.byte_instruction(instruction, offset),
-
-            OpCode::Jump | OpCode::JumpIfFalse | OpCode::Loop => {
-                let is_loop = matches!(instruction, OpCode::Loop);
-                self.jump_instruction(instruction, is_loop, offset)
-            }
-
-            OpCode::Invoke | OpCode::SuperInvoke => self.invoke_instruction(instruction, offset),
-
-            OpCode::Closure => {
-                let mut idx = offset + 1;
-                let constant_idx = self.code[idx] as usize;
-                print!("{name:-16} {constant_idx:4} ", name = "OP_CLOSURE");
-                self.constants.print_value(constant_idx, None);
-
-                let c = self.constants.values[constant_idx].as_closure();
-                idx += 1;
-                for _ in 0..c.function.upvalue_count {
-                    let is_local = if self.code[idx] == 0 {
-                        "upvalue"
-                    } else {
-                        "local"
-                    };
-                    idx += 1;
-                    let index = self.code[idx];
-                    idx += 1;
-                    println!(
-                        "{:04}      |                     {is_local} {index}",
-                        idx - 2
-                    );
-                }
-                idx
-            }
-        }
-    }
-
-    #[cfg(any(feature = "debug-trace-execution", feature = "debug-print-code"))]
-    pub fn disassemble<T: Display>(&self, name: T) {
-        println!("== {name} ==");
-
-        let mut offset = 0;
-        while offset < self.code.len() {
-            offset = self.disassemble_instruction(offset);
-        }
     }
 }
