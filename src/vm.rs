@@ -16,8 +16,8 @@ use crate::{
         ObjUpvalue,
     },
     object2::{
-        native_clock2, NativeFn2, Obj2, ObjClass2, ObjClosure2, ObjFunction, ObjInstance2,
-        ObjNative2, ObjString, ObjType, ObjUpvalue2,
+        native_clock2, NativeFn2, Obj2, ObjBoundMethod2, ObjClass2, ObjClosure2, ObjFunction,
+        ObjInstance2, ObjNative2, ObjString, ObjType, ObjUpvalue2,
     },
     table::Table,
     value::{Value, Value2},
@@ -688,6 +688,7 @@ pub struct VM2 {
     pub stack_top: *mut Value2,
     pub globals: Table,
     pub strings: Table,
+    pub init_string: *mut ObjString,
     pub open_upvalues: *mut ObjUpvalue2, // Intrusive linked list
 
     pub bytes_allocated: usize,
@@ -723,12 +724,20 @@ impl VM2 {
         self.globals.init();
         self.strings.init();
 
+        // GC now reads vm.initString. field initialized from result of copyString().
+        // But copying string allocs memory, which can trigger a GC.
+        // If collector ran at just the wrong time, it would read vm.initString before it had been initialized.
+        // So, first we zero the field out & clear ptr before freeObjects() in free();
+        self.init_string = std::ptr::null_mut();
+        self.init_string = Obj2::copy_string("init".as_bytes(), 4);
+
         self.define_native("clock", native_clock2);
     }
 
     pub fn free(&mut self) {
         self.globals.free();
         self.strings.free();
+        self.init_string = std::ptr::null_mut();
         free_objects();
     }
 
@@ -834,6 +843,13 @@ impl VM2 {
                         return Err(InterpretResult::RuntimeError);
                     }
                 }
+                OpCode::Invoke => {
+                    let method = self.READ_STRING();
+                    let arg_count = self.READ_BYTE();
+                    if !self.invoke(method, arg_count) {
+                        return Err(InterpretResult::RuntimeError);
+                    }
+                }
                 OpCode::Closure => {
                     let function = self.READ_CONSTANT().as_function();
                     let closure = ObjClosure2::new(function);
@@ -880,7 +896,7 @@ impl VM2 {
                 }
                 OpCode::Negate => {
                     if !self.peek(0).is_number() {
-                        self.runtime_error("Operand must be number.");
+                        self.runtime_error("Operand must be a number.");
                         return Err(InterpretResult::RuntimeError);
                     }
                     let v = Value2::number_val(-self.pop().as_number());
@@ -974,8 +990,8 @@ impl VM2 {
                         if (*instance).fields.get(name, &mut value) {
                             self.pop(); // instance
                             self.push(value);
-                        } else {
-                            self.runtime_error(&format!("Undefined property '{}'.", *name));
+                        } else if !self.bind_method((*instance).class, name) {
+                            return Err(InterpretResult::RuntimeError);
                         }
                     }
                 }
@@ -1106,7 +1122,7 @@ impl VM2 {
     fn call(&mut self, closure: *mut ObjClosure2, arg_count: u8) -> bool {
         let arity = unsafe { (*(*closure).function).arity } as u8;
         if arg_count != arity {
-            self.runtime_error(&format!("Expected {arity} arguments but got {arg_count}"));
+            self.runtime_error(&format!("Expected {arity} arguments but got {arg_count}."));
             return false;
         }
 
@@ -1142,8 +1158,21 @@ impl VM2 {
                     let class = callee.as_class();
                     unsafe {
                         *self.stack_top.wrapping_sub(arg_count as usize + 1) = Value2::obj_val(ObjInstance2::new(class));
+                        let mut initalizer = std::mem::zeroed();
+                        if (*class).methods.get(self.init_string, &mut initalizer) {
+                            return self.call(initalizer.as_closure(), arg_count);
+                        } else if arg_count != 0 {
+                            self.runtime_error(&format!("Expected 0 arguments but got {arg_count}."));
+                            return false;
+                        }
                     }
                     return true;
+                }
+                ObjType::BoundMethod => {
+                    let bound = callee.as_bound_method();
+                    //-argCount skips past args and - 1 adjusts for stackTop pointing just past last used stack slot.
+                    unsafe {*self.stack_top.offset(-(arg_count as isize) -1) = (*bound).reciever;}
+                    return self.call(unsafe {( *bound ).method}, arg_count);
                 }
                 ObjType::String | ObjType::Upvalue | ObjType::Instance => { /* Non-Callable Object Type */ }
             }
@@ -1151,6 +1180,54 @@ impl VM2 {
 
         self.runtime_error("Can only call funcitons and classes.");
         false
+    }
+
+    fn invoke_from_class(
+        &mut self,
+        class: *mut ObjClass2,
+        name: *mut ObjString,
+        arg_count: u8,
+    ) -> bool {
+        unsafe {
+            let mut method = std::mem::zeroed();
+            if !(*class).methods.get(name, &mut method) {
+                self.runtime_error(&format!("Undefined property '{}'.", *name));
+                return false;
+            }
+            self.call(method.as_closure(), arg_count)
+        }
+    }
+
+    fn invoke(&mut self, name: *mut ObjString, arg_count: u8) -> bool {
+        let receiver = self.peek(arg_count as isize);
+        if !receiver.is_instance() {
+            self.runtime_error("Only instances have methods.");
+            return false;
+        }
+        let instance = receiver.as_instance();
+        unsafe {
+            let mut value = std::mem::zeroed();
+            if (*instance).fields.get(name, &mut value) {
+                *self.stack_top.wrapping_sub(arg_count as usize + 1) = value;
+                return self.call_value(value, arg_count);
+            }
+        }
+        self.invoke_from_class(unsafe { (*instance).class }, name, arg_count)
+    }
+
+    fn bind_method(&mut self, class: *mut ObjClass2, name: *mut ObjString) -> bool {
+        unsafe {
+            let mut method = std::mem::zeroed();
+            if !(*class).methods.get(name, &mut method) {
+                self.runtime_error(&format!("Undefined property '{}'.", *name));
+                return false;
+            }
+
+            let bound = ObjBoundMethod2::new(self.peek(0), method.as_closure());
+            self.pop();
+            self.push(Value2::obj_val(bound));
+            true
+        }
     }
 
     fn capture_upvalue(&mut self, local: *mut Value2) -> *mut ObjUpvalue2 {

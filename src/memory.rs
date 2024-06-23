@@ -6,8 +6,8 @@ use std::{
 use crate::{
     compiler2::mark_compiler_roots,
     object2::{
-        Obj2, ObjClass2, ObjClosure2, ObjFunction, ObjInstance2, ObjNative2, ObjString, ObjType,
-        ObjUpvalue2,
+        Obj2, ObjBoundMethod2, ObjClass2, ObjClosure2, ObjFunction, ObjInstance2, ObjNative2,
+        ObjString, ObjType, ObjUpvalue2,
     },
     value::{Value2, ValueArray2},
     VM,
@@ -166,6 +166,9 @@ fn free_object(object: *mut Obj2) {
                 (*instance).fields.free();
                 FREE!(ObjInstance2, object);
             }
+            ObjType::BoundMethod => {
+                FREE!(ObjBoundMethod2, object);
+            }
         }
     }
 }
@@ -229,6 +232,7 @@ fn mark_roots() {
 
         VM.globals.mark();
         mark_compiler_roots();
+        mark_object(VM.init_string as *mut Obj2);
     }
 }
 
@@ -278,6 +282,11 @@ fn blacken_object(object: *mut Obj2) {
                 let instance = object as *mut ObjInstance2;
                 mark_object((*instance).class as *mut Obj2);
                 (*instance).fields.mark();
+            }
+            ObjType::BoundMethod => {
+                let bound = object as *mut ObjBoundMethod2;
+                mark_value((*bound).reciever);
+                mark_object((*bound).method as *mut Obj2);
             }
         }
     }

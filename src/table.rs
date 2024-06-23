@@ -133,7 +133,7 @@ impl Table {
         unsafe {
             for i in 0..(*from).capacity {
                 let entry = (*from).entries.offset(i);
-                if (*entry).key.is_null() {
+                if !(*entry).key.is_null() {
                     (*to).set((*entry).key, (*entry).value);
                 }
             }

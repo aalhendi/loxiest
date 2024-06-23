@@ -7,15 +7,15 @@ use crate::{
     scanner::{self, Scanner},
     token::{Token, TokenType},
     value::{Value, Value2},
-    COMPILER, COMPILING_CHUNK, CURRENT, PARSER,
+    COMPILER, COMPILING_CHUNK, CURRENT, CURRENT_CLASS, PARSER,
 };
 
 #[derive(PartialEq, Clone)]
 pub enum FunctionType {
     Function,
     Script,
-    // Method,
-    // Initializer,
+    Method,
+    Initializer,
 }
 
 #[derive(Debug, PartialEq, PartialOrd)]
@@ -254,6 +254,13 @@ impl Parser {
         self.emit_bytes(OpCode::Class, name_constant.into());
         self.define_variable(name_constant);
 
+        let mut class_compiler = ClassCompiler {
+            enclosing: unsafe { CURRENT_CLASS },
+        };
+        unsafe {
+            CURRENT_CLASS = &mut class_compiler;
+        }
+
         self.named_variable(class_name, false);
         self.consume(TokenType::LeftBrace, "Expect '{' before class body.");
         while !self.check(&TokenType::RightBrace) && !self.check(&TokenType::Eof) {
@@ -261,6 +268,10 @@ impl Parser {
         }
         self.consume(TokenType::RightBrace, "Expect '}' after class body.");
         self.emit_byte(OpCode::Pop);
+
+        unsafe {
+            CURRENT_CLASS = class_compiler.enclosing;
+        }
     }
 
     fn fun_declaration(&mut self) {
@@ -470,12 +481,11 @@ impl Parser {
             // This implicitly returns nil.
             self.emit_return();
         } else {
-            // if self.state.last().unwrap().kind == FunctionType::Initializer {
-            //     self.error("Can't return a value from an initializer.");
-            // }
+            if unsafe { (*CURRENT).function_type == FunctionType::Initializer } {
+                self.error("Can't return a value from an initializer.");
+            }
             // compile the value afterwards so compiler doesn’t get confused by trailing expression
             // and report a bunch of cascaded errors
-
             self.expression();
             self.consume(TokenType::Semicolon, "Expect ';' after return value.");
             self.emit_byte(OpCode::Return);
@@ -523,7 +533,11 @@ impl Parser {
     }
 
     fn emit_return(&mut self) {
-        self.emit_byte(OpCode::Nil);
+        if unsafe { (*CURRENT).function_type == FunctionType::Initializer } {
+            self.emit_bytes(OpCode::GetLocal.into(), 0);
+        } else {
+            self.emit_byte(OpCode::Nil);
+        }
         self.emit_byte(OpCode::Return);
     }
 
@@ -616,7 +630,11 @@ impl Parser {
         self.consume(TokenType::Identifier, "Expect method name.");
         let constant = self.identifier_constant(&self.previous.clone());
 
-        let type_ = FunctionType::Function;
+        let type_ = if self.previous.lexeme == "init" {
+            FunctionType::Initializer
+        } else {
+            FunctionType::Method
+        };
         self.function(type_);
         self.emit_bytes(OpCode::Method.into(), constant);
     }
@@ -673,6 +691,14 @@ impl Parser {
     fn variable(&mut self, can_assign: bool) {
         let name = &self.previous.clone();
         self.named_variable(name, can_assign);
+    }
+
+    fn this(&mut self) {
+        if unsafe { CURRENT_CLASS.is_null() } {
+            self.error("Can't use 'this' outside of a class.");
+            return;
+        }
+        self.variable(false);
     }
 
     fn named_variable(&mut self, name: &Token, can_assign: bool) {
@@ -891,7 +917,7 @@ impl Parser {
             Print => ParseRule::new(None, None, Precedence::None),
             Return => ParseRule::new(None, None, Precedence::None),
             Super => ParseRule::new(None, None, Precedence::None),
-            This => ParseRule::new(None, None, Precedence::None),
+            This => ParseRule::new(Some(|c, _can_assign| c.this()), None, Precedence::None),
             True => ParseRule::new(Some(|c, _can_assign| c.literal()), None, Precedence::None),
             Var => ParseRule::new(None, None, Precedence::None),
             While => ParseRule::new(None, None, Precedence::None),
@@ -957,6 +983,10 @@ impl Parser {
         eprintln!(": {message}");
         self.had_error = true;
     }
+}
+
+pub struct ClassCompiler {
+    pub enclosing: *mut ClassCompiler,
 }
 
 pub struct Compiler2 {
@@ -1038,6 +1068,7 @@ impl Compiler2 {
 
     pub fn init(&mut self, function_type: FunctionType) {
         let is_script = function_type == FunctionType::Script;
+        let is_function = function_type == FunctionType::Function;
         self.enclosing = unsafe { CURRENT };
         self.function = std::ptr::null_mut();
         self.function_type = function_type;
@@ -1055,7 +1086,12 @@ impl Compiler2 {
             let local = &mut (*CURRENT).locals[(*CURRENT).local_count];
             (*CURRENT).local_count += 1;
             local.depth = 0;
-            local.name.lexeme = String::new();
+            local.is_captured = false;
+            local.name = if !is_function {
+                Token::new(TokenType::This, "this", 0)
+            } else {
+                Token::undefined()
+            };
         }
     }
 }

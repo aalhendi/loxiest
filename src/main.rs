@@ -10,7 +10,7 @@ use std::{
 };
 
 use chunk::{Chunk2, OpCode};
-use compiler2::{Compiler2, Parser};
+use compiler2::{ClassCompiler, Compiler2, Parser};
 use scanner::Scanner;
 use vm::{VM, VM2};
 
@@ -32,6 +32,7 @@ pub static mut VM: VM2 = unsafe { std::mem::zeroed() };
 pub static mut COMPILING_CHUNK: *mut Chunk2 = unsafe { std::mem::zeroed() };
 // TODO(aalhendi): eventually, compiler shouldn't be global
 pub static mut CURRENT: *mut Compiler2 = std::ptr::null_mut();
+pub static mut CURRENT_CLASS: *mut ClassCompiler = std::ptr::null_mut();
 pub static mut COMPILER: Compiler2 = Compiler2::new_uninit();
 pub static mut PARSER: compiler2::Parser = Parser::new(String::new());
 

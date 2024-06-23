@@ -10,7 +10,7 @@ use std::{
 use crate::{
     memory::reallocate,
     object2::{
-        Obj2, ObjClass2, ObjClosure2, ObjFunction, ObjInstance2, ObjNative2, ObjString, ObjType,
+        Obj2, ObjBoundMethod2, ObjClass2, ObjClosure2, ObjFunction, ObjInstance2, ObjNative2, ObjString, ObjType
     },
     FREE_ARRAY,
 };
@@ -44,7 +44,7 @@ impl Display for Value2 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.type_ {
             ValueType::Bool => write!(f, "{}", self.as_bool()),
-            ValueType::Nil => write!(f, "Nil"),
+            ValueType::Nil => write!(f, "nil"),
             ValueType::Number => write!(f, "{}", self.as_number()),
             ValueType::Obj => match self.obj_type() {
                 ObjType::String => unsafe {
@@ -104,8 +104,24 @@ impl Display for Value2 {
                     for i in 0..(*str_ptr).length {
                         write!(f, "{}", (*chars_ptr.offset(i)) as char)?;
                     }
-                    write!(f, "'s instance",)
+                    write!(f, " instance",)
                 },
+                ObjType::BoundMethod => {
+                    unsafe {
+                        let func = (*(*self.as_bound_method()).method).function;
+                        let name_ptr = (*func).name;
+                        if name_ptr.is_null() {
+                            return write!(f, "<script>");
+                        }
+
+                        write!(f, "<fn ")?;
+                        let chars_ptr = (*name_ptr).chars;
+                        for i in 0..(*name_ptr).length {
+                            write!(f, "{}", (*chars_ptr.offset(i)) as char)?;
+                        }
+                        write!(f, ">",)
+                    }
+                }
             },
         }
     }
@@ -208,6 +224,14 @@ impl Value2 {
         debug_assert!(self.type_ == ValueType::Obj);
         unsafe {
             debug_assert!((*self.as_obj()).obj_type() == ObjType::Instance);
+            std::mem::transmute(self.as_obj())
+        }
+    }
+
+    pub fn as_bound_method(&self) -> *mut ObjBoundMethod2{
+        debug_assert!(self.type_ == ValueType::Obj);
+        unsafe {
+            debug_assert!((*self.as_obj()).obj_type() == ObjType::BoundMethod);
             std::mem::transmute(self.as_obj())
         }
     }

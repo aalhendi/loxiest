@@ -257,8 +257,7 @@ impl Chunk2 {
                 self.jump_instruction(instruction, is_loop, offset)
             }
 
-            // OpCode::Invoke | OpCode::SuperInvoke => self.invoke_instruction(instruction, offset),
-            OpCode::Invoke | OpCode::SuperInvoke => todo!(),
+            OpCode::Invoke | OpCode::SuperInvoke => self.invoke_instruction(instruction, offset),
 
             OpCode::Closure => {
                 let mut idx = offset + 1;
@@ -329,6 +328,18 @@ impl Chunk2 {
             false => offset + 3 + jump as usize,
         };
         println!("{name:-16} {offset:4} -> {dst}",);
+        offset + 3
+    }
+
+    #[cfg(any(feature = "debug-trace-execution", feature = "debug-print-code"))]
+    fn invoke_instruction(&self, name: OpCode, offset: usize) -> usize {
+        let constant_idx = unsafe {*self.code.wrapping_add(offset + 1)} as usize;
+        let arg_count = unsafe {*self.code.wrapping_add(offset + 2)} as usize;
+        let name = name.to_string();
+
+        print!("{name:-16} ({arg_count} args) {constant_idx:4} '");
+        let value = unsafe { *self.constants.values.wrapping_add(constant_idx) };
+        self.constants.print_value(value, Some('\''));
         offset + 3
     }
 }

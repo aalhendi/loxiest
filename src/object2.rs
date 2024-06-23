@@ -38,6 +38,7 @@ pub enum ObjType {
     Upvalue,
     Class,
     Instance,
+    BoundMethod,
 }
 
 #[repr(C)]
@@ -250,6 +251,25 @@ impl ObjInstance2 {
         }
 
         instance
+    }
+}
+
+#[repr(C)]
+pub struct ObjBoundMethod2 {
+    obj: Obj2,
+    pub reciever: Value2,
+    pub method: *mut ObjClosure2,
+}
+
+impl ObjBoundMethod2 {
+    pub fn new(receiver: Value2, method: *mut ObjClosure2) -> *mut Self {
+        let bound = ALLOCATE_OBJ!(ObjBoundMethod2, ObjType::BoundMethod);
+        unsafe {
+            (*bound).reciever = receiver;
+            (*bound).method = method;
+        }
+
+        bound
     }
 }
 
