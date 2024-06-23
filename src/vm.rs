@@ -304,6 +304,7 @@ impl VM {
                         unsafe {
                             let name_deref = &*name;
                             self.runtime_error(&format!("Undefined variable '{name_deref}'."));
+                            return Err(InterpretResult::RuntimeError);
                         }
                     }
                     self.push(value);
@@ -321,6 +322,7 @@ impl VM {
                         unsafe {
                             let name_deref = &*name;
                             self.runtime_error(&format!("Undefined variable '{name_deref}'."));
+                            return Err(InterpretResult::RuntimeError);
                         }
                     }
                 }

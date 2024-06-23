@@ -152,7 +152,7 @@ impl Parser {
         let mut i = (unsafe { (*CURRENT).local_count } as isize) - 1;
         while i >= 0 {
             let local = unsafe { &(*CURRENT).locals[i as usize] };
-            if local.depth != 1 && local.depth < unsafe { (*CURRENT).scope_depth } {
+            if local.depth != -1 && local.depth < unsafe { (*CURRENT).scope_depth } {
                 break;
             }
 
@@ -197,7 +197,7 @@ impl Parser {
             }
 
             if upvalue_count == u8::MAX as usize + 1 {
-                self.error("Too many closure variables in one function");
+                self.error("Too many closure variables in function.");
                 return 0;
             }
 
