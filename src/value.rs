@@ -32,45 +32,110 @@ union ValueUnion {
     obj: *mut Obj,
 }
 
+#[cfg(not(feature = "nan-boxing"))]
 #[derive(Clone, Copy)]
 pub struct Value {
     type_: ValueType,
     as_: ValueUnion,
 }
 
+#[cfg(feature = "nan-boxing")]
+#[repr(transparent)]
+#[derive(Clone, Copy, PartialEq)]
+pub struct Value(pub u64);
+
+#[cfg(feature = "nan-boxing")]
+const SIGN_BIT: u64 = 0b1000000000000000000000000000000000000000000000000000000000000000;
+#[cfg(feature = "nan-boxing")]
+// 0x7ffc000000000000 - all exponent bits, QNAN bit and one more to avoid Intel magic value
+const QNAN: u64 = 0b0111111111111100000000000000000000000000000000000000000000000000;
+#[cfg(feature = "nan-boxing")]
+const TAG_NIL: u64 = 0b01;
+#[cfg(feature = "nan-boxing")]
+const TAG_FALSE: u64 = 0b10;
+#[cfg(feature = "nan-boxing")]
+const TAG_TRUE: u64 = 0b11;
+#[cfg(feature = "nan-boxing")]
+pub const FALSE_VAL: Value = Value(QNAN | TAG_FALSE);
+#[cfg(feature = "nan-boxing")]
+pub const TRUE_VAL: Value = Value(QNAN | TAG_TRUE);
+#[cfg(feature = "nan-boxing")]
+pub const NIL_VAL: Value = Value(QNAN | TAG_NIL);
+
+// #[cfg(not(feature = "nan-boxing"))]
 impl Display for Value {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self.type_ {
-            ValueType::Bool => write!(f, "{}", self.as_bool()),
-            ValueType::Nil => write!(f, "nil"),
-            ValueType::Number => write!(f, "{}", self.as_number()),
-            ValueType::Obj => match self.obj_type() {
-                ObjType::String => unsafe {
-                    let str_ptr = self.as_string();
-                    let chars_ptr = (*str_ptr).chars;
-                    for i in 0..(*str_ptr).length {
-                        write!(f, "{}", (*chars_ptr.offset(i)) as char)?;
-                    }
-                    Ok(())
-                },
-                ObjType::Function => unsafe {
-                    let name_ptr = (*self.as_function()).name;
-                    if name_ptr.is_null() {
-                        return write!(f, "<script>");
-                    }
+        #[cfg(feature = "nan-boxing")]
+        {
+            if self.is_bool() {
+                write!(f, "{}", self.as_bool())
+            } else if self.is_nil() {
+                write!(f, "nil")
+            } else if self.is_number() {
+                write!(f, "{}", self.as_number())
+            } else if self.is_obj() {
+                match self.obj_type() {
+                    ObjType::String => unsafe {
+                        let str_ptr = self.as_string();
+                        let chars_ptr = (*str_ptr).chars;
+                        for i in 0..(*str_ptr).length {
+                            write!(f, "{}", (*chars_ptr.offset(i)) as char)?;
+                        }
+                        Ok(())
+                    },
+                    ObjType::Function => unsafe {
+                        let name_ptr = (*self.as_function()).name;
+                        if name_ptr.is_null() {
+                            return write!(f, "<script>");
+                        }
 
-                    write!(f, "<fn ")?;
-                    let chars_ptr = (*name_ptr).chars;
-                    for i in 0..(*name_ptr).length {
-                        write!(f, "{}", (*chars_ptr.offset(i)) as char)?;
+                        write!(f, "<fn ")?;
+                        let chars_ptr = (*name_ptr).chars;
+                        for i in 0..(*name_ptr).length {
+                            write!(f, "{}", (*chars_ptr.offset(i)) as char)?;
+                        }
+                        write!(f, ">",)
+                    },
+                    ObjType::Native => write!(f, "<native fn>"),
+                    ObjType::Closure => {
+                        // TODO(aalhendi): Refactor
+                        unsafe {
+                            let func = (*self.as_closure()).function;
+                            let name_ptr = (*func).name;
+                            if name_ptr.is_null() {
+                                return write!(f, "<script>");
+                            }
+
+                            write!(f, "<fn ")?;
+                            let chars_ptr = (*name_ptr).chars;
+                            for i in 0..(*name_ptr).length {
+                                write!(f, "{}", (*chars_ptr.offset(i)) as char)?;
+                            }
+                            write!(f, ">",)
+                        }
                     }
-                    write!(f, ">",)
-                },
-                ObjType::Native => write!(f, "<native fn>"),
-                ObjType::Closure => {
-                    // TODO(aalhendi): Refactor
-                    unsafe {
-                        let func = (*self.as_closure()).function;
+                    // Upvalues exist only to take advantage VM’s memory management.
+                    // They aren’t first-class values that a Lox user can directly access in a program
+                    // Unreachable (?)
+                    ObjType::Upvalue => write!(f, "upvalue"),
+                    ObjType::Class => unsafe {
+                        let str_ptr = (*self.as_class()).name;
+                        let chars_ptr = (*str_ptr).chars;
+                        for i in 0..(*str_ptr).length {
+                            write!(f, "{}", (*chars_ptr.offset(i)) as char)?;
+                        }
+                        Ok(())
+                    },
+                    ObjType::Instance => unsafe {
+                        let str_ptr = (*(*self.as_instance()).class).name;
+                        let chars_ptr = (*str_ptr).chars;
+                        for i in 0..(*str_ptr).length {
+                            write!(f, "{}", (*chars_ptr.offset(i)) as char)?;
+                        }
+                        write!(f, " instance",)
+                    },
+                    ObjType::BoundMethod => unsafe {
+                        let func = (*(*self.as_bound_method()).method).function;
                         let name_ptr = (*func).name;
                         if name_ptr.is_null() {
                             return write!(f, "<script>");
@@ -82,63 +147,139 @@ impl Display for Value {
                             write!(f, "{}", (*chars_ptr.offset(i)) as char)?;
                         }
                         write!(f, ">",)
-                    }
+                    },
                 }
-                // Upvalues exist only to take advantage VM’s memory management.
-                // They aren’t first-class values that a Lox user can directly access in a program
-                // Unreachable (?)
-                ObjType::Upvalue => write!(f, "upvalue"),
-                ObjType::Class => unsafe {
-                    let str_ptr = (*self.as_class()).name;
-                    let chars_ptr = (*str_ptr).chars;
-                    for i in 0..(*str_ptr).length {
-                        write!(f, "{}", (*chars_ptr.offset(i)) as char)?;
-                    }
-                    Ok(())
-                },
-                ObjType::Instance => unsafe {
-                    let str_ptr = (*(*self.as_instance()).class).name;
-                    let chars_ptr = (*str_ptr).chars;
-                    for i in 0..(*str_ptr).length {
-                        write!(f, "{}", (*chars_ptr.offset(i)) as char)?;
-                    }
-                    write!(f, " instance",)
-                },
-                ObjType::BoundMethod => unsafe {
-                    let func = (*(*self.as_bound_method()).method).function;
-                    let name_ptr = (*func).name;
-                    if name_ptr.is_null() {
-                        return write!(f, "<script>");
-                    }
+            } else {
+                unreachable!()
+            }
+        }
 
-                    write!(f, "<fn ")?;
-                    let chars_ptr = (*name_ptr).chars;
-                    for i in 0..(*name_ptr).length {
-                        write!(f, "{}", (*chars_ptr.offset(i)) as char)?;
+        #[cfg(not(feature = "nan-boxing"))]
+        {
+            match self.type_ {
+                ValueType::Bool => write!(f, "{}", self.as_bool()),
+                ValueType::Nil => write!(f, "nil"),
+                ValueType::Number => write!(f, "{}", self.as_number()),
+                ValueType::Obj => match self.obj_type() {
+                    ObjType::String => unsafe {
+                        let str_ptr = self.as_string();
+                        let chars_ptr = (*str_ptr).chars;
+                        for i in 0..(*str_ptr).length {
+                            write!(f, "{}", (*chars_ptr.offset(i)) as char)?;
+                        }
+                        Ok(())
+                    },
+                    ObjType::Function => unsafe {
+                        let name_ptr = (*self.as_function()).name;
+                        if name_ptr.is_null() {
+                            return write!(f, "<script>");
+                        }
+
+                        write!(f, "<fn ")?;
+                        let chars_ptr = (*name_ptr).chars;
+                        for i in 0..(*name_ptr).length {
+                            write!(f, "{}", (*chars_ptr.offset(i)) as char)?;
+                        }
+                        write!(f, ">",)
+                    },
+                    ObjType::Native => write!(f, "<native fn>"),
+                    ObjType::Closure => {
+                        // TODO(aalhendi): Refactor
+                        unsafe {
+                            let func = (*self.as_closure()).function;
+                            let name_ptr = (*func).name;
+                            if name_ptr.is_null() {
+                                return write!(f, "<script>");
+                            }
+
+                            write!(f, "<fn ")?;
+                            let chars_ptr = (*name_ptr).chars;
+                            for i in 0..(*name_ptr).length {
+                                write!(f, "{}", (*chars_ptr.offset(i)) as char)?;
+                            }
+                            write!(f, ">",)
+                        }
                     }
-                    write!(f, ">",)
+                    // Upvalues exist only to take advantage VM’s memory management.
+                    // They aren’t first-class values that a Lox user can directly access in a program
+                    // Unreachable (?)
+                    ObjType::Upvalue => write!(f, "upvalue"),
+                    ObjType::Class => unsafe {
+                        let str_ptr = (*self.as_class()).name;
+                        let chars_ptr = (*str_ptr).chars;
+                        for i in 0..(*str_ptr).length {
+                            write!(f, "{}", (*chars_ptr.offset(i)) as char)?;
+                        }
+                        Ok(())
+                    },
+                    ObjType::Instance => unsafe {
+                        let str_ptr = (*(*self.as_instance()).class).name;
+                        let chars_ptr = (*str_ptr).chars;
+                        for i in 0..(*str_ptr).length {
+                            write!(f, "{}", (*chars_ptr.offset(i)) as char)?;
+                        }
+                        write!(f, " instance",)
+                    },
+                    ObjType::BoundMethod => unsafe {
+                        let func = (*(*self.as_bound_method()).method).function;
+                        let name_ptr = (*func).name;
+                        if name_ptr.is_null() {
+                            return write!(f, "<script>");
+                        }
+
+                        write!(f, "<fn ")?;
+                        let chars_ptr = (*name_ptr).chars;
+                        for i in 0..(*name_ptr).length {
+                            write!(f, "{}", (*chars_ptr.offset(i)) as char)?;
+                        }
+                        write!(f, ">",)
+                    },
                 },
-            },
+            }
         }
     }
 }
 
 impl Value {
     pub const fn bool_val(value: bool) -> Self {
-        Self {
-            type_: ValueType::Bool,
-            as_: ValueUnion { boolean: value },
+        #[cfg(feature = "nan-boxing")]
+        {
+            if value {
+                TRUE_VAL
+            } else {
+                FALSE_VAL
+            }
+        }
+        #[cfg(not(feature = "nan-boxing"))]
+        {
+            Self {
+                type_: ValueType::Bool,
+                as_: ValueUnion { boolean: value },
+            }
         }
     }
 
     pub const fn nil_val() -> Self {
-        Self {
-            type_: ValueType::Nil,
-            as_: ValueUnion { number: 0.0 },
+        #[cfg(feature = "nan-boxing")]
+        {
+            NIL_VAL
+        }
+        #[cfg(not(feature = "nan-boxing"))]
+        {
+            Self {
+                type_: ValueType::Nil,
+                as_: ValueUnion { number: 0.0 },
+            }
         }
     }
 
     pub const fn number_val(value: f64) -> Self {
+        #[cfg(feature = "nan-boxing")]
+        // Self(value.to_bits()) // TODO(aalhendi): unstable as const fn
+        unsafe {
+            Self(std::mem::transmute::<f64, u64>(value))
+        }
+        #[cfg(not(feature = "nan-boxing"))]
         Self {
             type_: ValueType::Number,
             as_: ValueUnion { number: value },
@@ -146,33 +287,68 @@ impl Value {
     }
 
     pub const fn obj_val<T>(object: *mut T) -> Self {
-        Self {
-            type_: ValueType::Obj,
-            as_: ValueUnion {
-                obj: object as *mut Obj,
-            },
+        #[cfg(feature = "nan-boxing")]
+        {
+            // SAFETY: transmuting a ptr to u64, relies on ptr being 64-bit and is unsafe.
+            unsafe { Value(SIGN_BIT | QNAN | std::mem::transmute::<*mut T, u64>(object)) }
+        }
+
+        #[cfg(not(feature = "nan-boxing"))]
+        {
+            Self {
+                type_: ValueType::Obj,
+                as_: ValueUnion {
+                    obj: object as *mut Obj,
+                },
+            }
         }
     }
 
     // PERF(aalhendi): does match/panic really add overhead? I didnt bother finding out...
     pub fn as_bool(&self) -> bool {
-        // match self.type_ {
-        //     ValueType::Bool => self.as_.boolean,
-        //     _ => panic!("Value is not a boolean"),
-        // }
-        unsafe { self.as_.boolean }
+        #[cfg(feature = "nan-boxing")]
+        {
+            self == &TRUE_VAL
+        }
+
+        #[cfg(not(feature = "nan-boxing"))]
+        {
+            // match self.type_ {
+            //     ValueType::Bool => self.as_.boolean,
+            //     _ => panic!("Value is not a boolean"),
+            // }
+            unsafe { self.as_.boolean }
+        }
     }
 
     pub fn as_number(&self) -> f64 {
-        unsafe { self.as_.number }
+        #[cfg(feature = "nan-boxing")]
+        {
+            f64::from_bits(self.0)
+        }
+        #[cfg(not(feature = "nan-boxing"))]
+        unsafe {
+            self.as_.number
+        }
     }
 
     pub fn as_obj(&self) -> *mut Obj {
-        unsafe { self.as_.obj }
+        #[cfg(feature = "nan-boxing")]
+        {
+            (self.0 & !(SIGN_BIT | QNAN)) as *mut Obj
+        }
+
+        #[cfg(not(feature = "nan-boxing"))]
+        unsafe {
+            self.as_.obj
+        }
     }
 
     pub fn as_string(&self) -> *mut ObjString {
-        debug_assert!(self.type_ == ValueType::Obj);
+        #[cfg(not(feature = "nan-boxing"))]
+        {
+            debug_assert!(self.type_ == ValueType::Obj);
+        }
         unsafe {
             debug_assert!((*self.as_obj()).obj_type() == ObjType::String);
             std::mem::transmute(self.as_obj())
@@ -185,7 +361,10 @@ impl Value {
     }
 
     pub fn as_function(&self) -> *mut ObjFunction {
-        debug_assert!(self.type_ == ValueType::Obj);
+        #[cfg(not(feature = "nan-boxing"))]
+        {
+            debug_assert!(self.type_ == ValueType::Obj);
+        }
         unsafe {
             debug_assert!((*self.as_obj()).obj_type() == ObjType::Function);
             std::mem::transmute(self.as_obj())
@@ -193,7 +372,10 @@ impl Value {
     }
 
     pub fn as_native(&self) -> fn(arg_count: usize, args: &[Value]) -> Value {
-        debug_assert!(self.type_ == ValueType::Obj);
+        #[cfg(not(feature = "nan-boxing"))]
+        {
+            debug_assert!(self.type_ == ValueType::Obj);
+        }
         unsafe {
             debug_assert!((*self.as_obj()).obj_type() == ObjType::Native);
             (*std::mem::transmute::<*mut Obj, *mut ObjNative2>(self.as_obj())).function
@@ -201,7 +383,10 @@ impl Value {
     }
 
     pub fn as_closure(&self) -> *mut ObjClosure2 {
-        debug_assert!(self.type_ == ValueType::Obj);
+        #[cfg(not(feature = "nan-boxing"))]
+        {
+            debug_assert!(self.type_ == ValueType::Obj);
+        }
         unsafe {
             debug_assert!((*self.as_obj()).obj_type() == ObjType::Closure);
             std::mem::transmute(self.as_obj())
@@ -209,7 +394,10 @@ impl Value {
     }
 
     pub fn as_class(&self) -> *mut ObjClass2 {
-        debug_assert!(self.type_ == ValueType::Obj);
+        #[cfg(not(feature = "nan-boxing"))]
+        {
+            debug_assert!(self.type_ == ValueType::Obj);
+        }
         unsafe {
             debug_assert!((*self.as_obj()).obj_type() == ObjType::Class);
             std::mem::transmute(self.as_obj())
@@ -217,7 +405,10 @@ impl Value {
     }
 
     pub fn as_instance(&self) -> *mut ObjInstance2 {
-        debug_assert!(self.type_ == ValueType::Obj);
+        #[cfg(not(feature = "nan-boxing"))]
+        {
+            debug_assert!(self.type_ == ValueType::Obj);
+        }
         unsafe {
             debug_assert!((*self.as_obj()).obj_type() == ObjType::Instance);
             std::mem::transmute(self.as_obj())
@@ -225,7 +416,10 @@ impl Value {
     }
 
     pub fn as_bound_method(&self) -> *mut ObjBoundMethod2 {
-        debug_assert!(self.type_ == ValueType::Obj);
+        #[cfg(not(feature = "nan-boxing"))]
+        {
+            debug_assert!(self.type_ == ValueType::Obj);
+        }
         unsafe {
             debug_assert!((*self.as_obj()).obj_type() == ObjType::BoundMethod);
             std::mem::transmute(self.as_obj())
@@ -233,19 +427,49 @@ impl Value {
     }
 
     pub fn is_bool(&self) -> bool {
-        self.type_ == ValueType::Bool
+        #[cfg(feature = "nan-boxing")]
+        {
+            (self.0 | 1) == TRUE_VAL.0
+            // self == &TRUE_VAL || self == &FALSE_VAL
+        }
+        #[cfg(not(feature = "nan-boxing"))]
+        {
+            self.type_ == ValueType::Bool
+        }
     }
 
     pub fn is_nil(&self) -> bool {
-        self.type_ == ValueType::Nil
+        #[cfg(feature = "nan-boxing")]
+        {
+            self == &NIL_VAL
+        }
+        #[cfg(not(feature = "nan-boxing"))]
+        {
+            self.type_ == ValueType::Nil
+        }
     }
 
     pub fn is_number(&self) -> bool {
-        self.type_ == ValueType::Number
+        #[cfg(feature = "nan-boxing")]
+        {
+            (self.0 & QNAN) != QNAN
+        }
+        #[cfg(not(feature = "nan-boxing"))]
+        {
+            self.type_ == ValueType::Number
+        }
     }
 
     pub fn is_obj(&self) -> bool {
-        self.type_ == ValueType::Obj
+        #[cfg(feature = "nan-boxing")]
+        {
+            self.0 & (QNAN | SIGN_BIT) == QNAN | SIGN_BIT
+        }
+
+        #[cfg(not(feature = "nan-boxing"))]
+        {
+            self.type_ == ValueType::Obj
+        }
     }
 
     pub fn is_string(&self) -> bool {
@@ -261,7 +485,10 @@ impl Value {
     }
 
     pub fn obj_type(&self) -> ObjType {
-        debug_assert!(self.type_ == ValueType::Obj);
+        #[cfg(not(feature = "nan-boxing"))]
+        {
+            debug_assert!(self.type_ == ValueType::Obj);
+        }
         unsafe { (*self.as_obj()).obj_type() }
     }
 
@@ -276,14 +503,26 @@ impl Value {
 
     // TODO(aalhendi): probably revise this
     pub fn equal(a: Value, b: Value) -> bool {
-        if a.type_ != b.type_ {
-            return false;
+        #[cfg(feature = "nan-boxing")]
+        {
+            // NOTE(aalhendi): IEEE specs lists NaN != NaN
+            // this ensures “real” arithmetic NaNs produced in lox are not equal to themselves
+            if a.is_number() && b.is_number() {
+                return a.as_number() == b.as_number();
+            }
+            a == b
         }
-        match a.type_ {
-            ValueType::Bool => a.as_bool() == b.as_bool(),
-            ValueType::Nil => true,
-            ValueType::Number => a.as_number() == b.as_number(),
-            ValueType::Obj => a.as_obj() == b.as_obj(),
+        #[cfg(not(feature = "nan-boxing"))]
+        {
+            if a.type_ != b.type_ {
+                return false;
+            }
+            match a.type_ {
+                ValueType::Bool => a.as_bool() == b.as_bool(),
+                ValueType::Nil => true,
+                ValueType::Number => a.as_number() == b.as_number(),
+                ValueType::Obj => a.as_obj() == b.as_obj(),
+            }
         }
     }
 }

@@ -12,7 +12,8 @@ debug-trace-execution = []
 debug-print-code = []
 debug-stress-gc = []
 debug-log-gc = []
-default = ["debug-trace-execution", "debug-print-code", "debug-log-gc", "debug-stress-gc"]
+nan-boxing = []
+default = ["nan-boxing"]
 
 [profile.release]
 debug = true
