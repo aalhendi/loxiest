@@ -37,7 +37,7 @@ impl Table {
         capacity: isize,
     ) -> *mut Entry {
         unsafe {
-            let mut index: u32 = (*key).hash % capacity as u32;
+            let mut index: u32 = (*key).hash & (capacity as u32 - 1);
             let mut tombstone: *mut Entry = std::ptr::null_mut();
             loop {
                 let entry = entries.offset(index as isize);
@@ -80,7 +80,7 @@ impl Table {
                     }
                 }
 
-                index = (index + 1) % capacity as u32;
+                index = (index + 1) & (capacity as u32 - 1);
             }
         }
     }
