@@ -599,10 +599,11 @@ impl VM {
         unsafe {
             if let Some(value) = (*instance).fields.get(name) {
                 *self.stack_top.wrapping_sub(arg_count as usize + 1) = value;
-                return self.call_value(value, arg_count);
+                self.call_value(value, arg_count)
+            } else {
+                self.invoke_from_class((*instance).class, name, arg_count)
             }
         }
-        self.invoke_from_class(unsafe { (*instance).class }, name, arg_count)
     }
 
     fn bind_method(&mut self, class: *mut ObjClass2, name: *mut ObjString) -> bool {

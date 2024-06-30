@@ -30,12 +30,17 @@ impl Table {
         self.init();
     }
 
-    fn find_entry(&mut self, key: *mut ObjString) -> *mut Entry {
+    fn find_entry(
+        &mut self,
+        entries: *mut Entry,
+        key: *mut ObjString,
+        capacity: isize,
+    ) -> *mut Entry {
         unsafe {
-            let mut index: u32 = (*key).hash % self.capacity as u32;
+            let mut index: u32 = (*key).hash % capacity as u32;
             let mut tombstone: *mut Entry = std::ptr::null_mut();
             loop {
-                let entry = self.entries.offset(index as isize);
+                let entry = entries.offset(index as isize);
                 if (*entry).key.is_null() {
                     if (*entry).value.is_nil() {
                         // Empty entry
@@ -75,7 +80,7 @@ impl Table {
                     }
                 }
 
-                index = (index + 1) % self.capacity as u32;
+                index = (index + 1) % capacity as u32;
             }
         }
     }
@@ -85,7 +90,7 @@ impl Table {
             return None;
         }
 
-        let entry = self.find_entry(key);
+        let entry = self.find_entry(self.entries, key, self.capacity);
         unsafe {
             if (*entry).key.is_null() {
                 return None;
@@ -113,7 +118,7 @@ impl Table {
                     continue;
                 }
 
-                let dst = self.find_entry((*entry).key);
+                let dst = self.find_entry(entries, (*entry).key, capacity);
                 (*dst).key = (*entry).key;
                 (*dst).value = (*entry).value;
                 self.count += 1;
@@ -131,7 +136,7 @@ impl Table {
             self.adjust_capcity(capacity);
         }
 
-        let entry = self.find_entry(key);
+        let entry = self.find_entry(self.entries, key, self.capacity);
         unsafe {
             let is_new_key = (*entry).key.is_null();
             if is_new_key && (*entry).value.is_nil() {
@@ -149,7 +154,7 @@ impl Table {
             return false;
         }
 
-        let entry = self.find_entry(key);
+        let entry = self.find_entry(self.entries, key, self.capacity);
         unsafe {
             if (*entry).key.is_null() {
                 return false;
