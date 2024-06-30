@@ -1,6 +1,7 @@
 use std::{
     cell::RefCell,
     collections::{hash_map::Entry, HashMap},
+    hint::unreachable_unchecked,
     mem::MaybeUninit,
     ops::Deref,
     rc::Rc,
@@ -377,7 +378,7 @@ impl VM {
                 OpCode::Equal => {
                     let b = self.pop();
                     let a = self.pop();
-                    self.push(Value::bool_val(Value::equal(a, b)));
+                    self.push(Value::bool_val(a == b));
                 }
                 OpCode::Greater => binary_op!(self, Value::bool_val, >),
                 OpCode::Less => binary_op!(self, Value::bool_val, <),
@@ -535,7 +536,8 @@ impl VM {
         if callee.is_obj() {
             match callee.obj_type() {
                 ObjType::Closure => return self.call(callee.as_closure(), arg_count),
-                ObjType::Function => unreachable!("Bare ObjFunction calls are not implemented. ObjFunctions are always wrapped in ObjClosures."),
+                // NOTE: Bare ObjFunction calls are not implemented. ObjFunctions are always wrapped in ObjClosures.
+                ObjType::Function => unsafe { unreachable_unchecked() },
                 ObjType::Native => {
                     let native = callee.as_native();
                     let args = unsafe {
@@ -549,11 +551,14 @@ impl VM {
                 ObjType::Class => {
                     let class = callee.as_class();
                     unsafe {
-                        *self.stack_top.wrapping_sub(arg_count as usize + 1) = Value::obj_val(ObjInstance2::new(class));
+                        *self.stack_top.wrapping_sub(arg_count as usize + 1) =
+                            Value::obj_val(ObjInstance2::new(class));
                         if let Some(initializer) = (*class).methods.get(self.init_string) {
                             return self.call(initializer.as_closure(), arg_count);
                         } else if arg_count != 0 {
-                            self.runtime_error(&format!("Expected 0 arguments but got {arg_count}."));
+                            self.runtime_error(&format!(
+                                "Expected 0 arguments but got {arg_count}."
+                            ));
                             return false;
                         }
                     }
@@ -562,10 +567,13 @@ impl VM {
                 ObjType::BoundMethod => {
                     let bound = callee.as_bound_method();
                     //-argCount skips past args and - 1 adjusts for stackTop pointing just past last used stack slot.
-                    unsafe {*self.stack_top.offset(-(arg_count as isize) -1) = (*bound).reciever;}
-                    return self.call(unsafe {( *bound ).method}, arg_count);
+                    unsafe {
+                        *self.stack_top.offset(-(arg_count as isize) - 1) = (*bound).reciever;
+                    }
+                    return self.call(unsafe { (*bound).method }, arg_count);
                 }
-                ObjType::String | ObjType::Upvalue | ObjType::Instance => { /* Non-Callable Object Type */ }
+                ObjType::String | ObjType::Upvalue | ObjType::Instance => { /* Non-Callable Object Type */
+                }
             }
         }
 

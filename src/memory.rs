@@ -26,8 +26,7 @@ pub fn reallocate(
             .wrapping_add(new_size.wrapping_sub(old_size));
     }
     if new_size > old_size {
-        #[cfg(feature = "debug-stress-gc")]
-        {
+        if cfg!(feature = "debug-stress-gc") {
             collect_garbage();
         }
 

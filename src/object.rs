@@ -145,6 +145,19 @@ impl ObjFunction {
     }
 }
 
+impl Display for ObjFunction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        unsafe {
+            let name_ptr = self.name;
+            if name_ptr.is_null() {
+                return write!(f, "<script>");
+            }
+
+            write!(f, "<fn {}>", *name_ptr)
+        }
+    }
+}
+
 pub fn native_clock2(_arg_count: usize, _args: &[Value]) -> Value {
     match SystemTime::now().duration_since(SystemTime::UNIX_EPOCH) {
         Ok(n) => Value::number_val(n.as_secs_f64()),

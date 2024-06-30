@@ -1,6 +1,7 @@
 use std::{
     cell::RefCell,
     fmt::Display,
+    hint::unreachable_unchecked,
     mem,
     ops::{Deref, Neg},
     ptr::null_mut,
@@ -41,7 +42,7 @@ pub struct Value {
 
 #[cfg(feature = "nan-boxing")]
 #[repr(transparent)]
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy)]
 pub struct Value(pub u64);
 
 #[cfg(feature = "nan-boxing")]
@@ -62,7 +63,6 @@ pub const TRUE_VAL: Value = Value(QNAN | TAG_TRUE);
 #[cfg(feature = "nan-boxing")]
 pub const NIL_VAL: Value = Value(QNAN | TAG_NIL);
 
-// #[cfg(not(feature = "nan-boxing"))]
 impl Display for Value {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         #[cfg(feature = "nan-boxing")]
@@ -75,82 +75,38 @@ impl Display for Value {
                 write!(f, "{}", self.as_number())
             } else if self.is_obj() {
                 match self.obj_type() {
-                    ObjType::String => unsafe {
+                    ObjType::String => {
                         let str_ptr = self.as_string();
-                        let chars_ptr = (*str_ptr).chars;
-                        for i in 0..(*str_ptr).length {
-                            write!(f, "{}", (*chars_ptr.offset(i)) as char)?;
-                        }
-                        Ok(())
-                    },
-                    ObjType::Function => unsafe {
-                        let name_ptr = (*self.as_function()).name;
-                        if name_ptr.is_null() {
-                            return write!(f, "<script>");
-                        }
-
-                        write!(f, "<fn ")?;
-                        let chars_ptr = (*name_ptr).chars;
-                        for i in 0..(*name_ptr).length {
-                            write!(f, "{}", (*chars_ptr.offset(i)) as char)?;
-                        }
-                        write!(f, ">",)
-                    },
-                    ObjType::Native => write!(f, "<native fn>"),
-                    ObjType::Closure => {
-                        // TODO(aalhendi): Refactor
-                        unsafe {
-                            let func = (*self.as_closure()).function;
-                            let name_ptr = (*func).name;
-                            if name_ptr.is_null() {
-                                return write!(f, "<script>");
-                            }
-
-                            write!(f, "<fn ")?;
-                            let chars_ptr = (*name_ptr).chars;
-                            for i in 0..(*name_ptr).length {
-                                write!(f, "{}", (*chars_ptr.offset(i)) as char)?;
-                            }
-                            write!(f, ">",)
-                        }
+                        unsafe { write!(f, "{}", *str_ptr) }
                     }
+                    ObjType::Function => {
+                        let fn_ptr = self.as_function();
+                        unsafe { write!(f, "{}", *fn_ptr) }
+                    }
+                    ObjType::Native => write!(f, "<native fn>"),
+                    ObjType::Closure => unsafe {
+                        let fn_ptr = (*self.as_closure()).function;
+                        write!(f, "{}", *fn_ptr)
+                    },
                     // Upvalues exist only to take advantage VM’s memory management.
                     // They aren’t first-class values that a Lox user can directly access in a program
-                    // Unreachable (?)
-                    ObjType::Upvalue => write!(f, "upvalue"),
+                    // ObjType::Upvalue => write!(f, "upvalue"),
+                    ObjType::Upvalue => unsafe { unreachable_unchecked() },
                     ObjType::Class => unsafe {
                         let str_ptr = (*self.as_class()).name;
-                        let chars_ptr = (*str_ptr).chars;
-                        for i in 0..(*str_ptr).length {
-                            write!(f, "{}", (*chars_ptr.offset(i)) as char)?;
-                        }
-                        Ok(())
+                        write!(f, "{}", *str_ptr)
                     },
                     ObjType::Instance => unsafe {
                         let str_ptr = (*(*self.as_instance()).class).name;
-                        let chars_ptr = (*str_ptr).chars;
-                        for i in 0..(*str_ptr).length {
-                            write!(f, "{}", (*chars_ptr.offset(i)) as char)?;
-                        }
-                        write!(f, " instance",)
+                        write!(f, "{} instance", *str_ptr)
                     },
                     ObjType::BoundMethod => unsafe {
-                        let func = (*(*self.as_bound_method()).method).function;
-                        let name_ptr = (*func).name;
-                        if name_ptr.is_null() {
-                            return write!(f, "<script>");
-                        }
-
-                        write!(f, "<fn ")?;
-                        let chars_ptr = (*name_ptr).chars;
-                        for i in 0..(*name_ptr).length {
-                            write!(f, "{}", (*chars_ptr.offset(i)) as char)?;
-                        }
-                        write!(f, ">",)
+                        let fn_ptr = (*(*self.as_bound_method()).method).function;
+                        write!(f, "{}", *fn_ptr)
                     },
                 }
             } else {
-                unreachable!()
+                unsafe { unreachable_unchecked() }
             }
         }
 
@@ -161,78 +117,34 @@ impl Display for Value {
                 ValueType::Nil => write!(f, "nil"),
                 ValueType::Number => write!(f, "{}", self.as_number()),
                 ValueType::Obj => match self.obj_type() {
-                    ObjType::String => unsafe {
+                    ObjType::String => {
                         let str_ptr = self.as_string();
-                        let chars_ptr = (*str_ptr).chars;
-                        for i in 0..(*str_ptr).length {
-                            write!(f, "{}", (*chars_ptr.offset(i)) as char)?;
-                        }
-                        Ok(())
-                    },
-                    ObjType::Function => unsafe {
-                        let name_ptr = (*self.as_function()).name;
-                        if name_ptr.is_null() {
-                            return write!(f, "<script>");
-                        }
-
-                        write!(f, "<fn ")?;
-                        let chars_ptr = (*name_ptr).chars;
-                        for i in 0..(*name_ptr).length {
-                            write!(f, "{}", (*chars_ptr.offset(i)) as char)?;
-                        }
-                        write!(f, ">",)
-                    },
-                    ObjType::Native => write!(f, "<native fn>"),
-                    ObjType::Closure => {
-                        // TODO(aalhendi): Refactor
-                        unsafe {
-                            let func = (*self.as_closure()).function;
-                            let name_ptr = (*func).name;
-                            if name_ptr.is_null() {
-                                return write!(f, "<script>");
-                            }
-
-                            write!(f, "<fn ")?;
-                            let chars_ptr = (*name_ptr).chars;
-                            for i in 0..(*name_ptr).length {
-                                write!(f, "{}", (*chars_ptr.offset(i)) as char)?;
-                            }
-                            write!(f, ">",)
-                        }
+                        unsafe { write!(f, "{}", *str_ptr) }
                     }
+                    ObjType::Function => {
+                        let fn_ptr = self.as_function();
+                        unsafe { write!(f, "{}", *fn_ptr) }
+                    }
+                    ObjType::Native => write!(f, "<native fn>"),
+                    ObjType::Closure => unsafe {
+                        let fn_ptr = (*self.as_closure()).function;
+                        write!(f, "{}", *fn_ptr)
+                    },
                     // Upvalues exist only to take advantage VM’s memory management.
                     // They aren’t first-class values that a Lox user can directly access in a program
                     // Unreachable (?)
                     ObjType::Upvalue => write!(f, "upvalue"),
                     ObjType::Class => unsafe {
                         let str_ptr = (*self.as_class()).name;
-                        let chars_ptr = (*str_ptr).chars;
-                        for i in 0..(*str_ptr).length {
-                            write!(f, "{}", (*chars_ptr.offset(i)) as char)?;
-                        }
-                        Ok(())
+                        write!(f, "{}", *str_ptr)
                     },
                     ObjType::Instance => unsafe {
                         let str_ptr = (*(*self.as_instance()).class).name;
-                        let chars_ptr = (*str_ptr).chars;
-                        for i in 0..(*str_ptr).length {
-                            write!(f, "{}", (*chars_ptr.offset(i)) as char)?;
-                        }
-                        write!(f, " instance",)
+                        write!(f, "{} instance", *str_ptr)
                     },
                     ObjType::BoundMethod => unsafe {
-                        let func = (*(*self.as_bound_method()).method).function;
-                        let name_ptr = (*func).name;
-                        if name_ptr.is_null() {
-                            return write!(f, "<script>");
-                        }
-
-                        write!(f, "<fn ")?;
-                        let chars_ptr = (*name_ptr).chars;
-                        for i in 0..(*name_ptr).length {
-                            write!(f, "{}", (*chars_ptr.offset(i)) as char)?;
-                        }
-                        write!(f, ">",)
+                        let fn_ptr = (*(*self.as_bound_method()).method).function;
+                        write!(f, "{}", *fn_ptr)
                     },
                 },
             }
@@ -500,29 +412,29 @@ impl Value {
     pub fn is_falsey(&self) -> bool {
         self.is_nil() || (self.is_bool() && !self.as_bool())
     }
+}
 
-    // TODO(aalhendi): probably revise this
-    pub fn equal(a: Value, b: Value) -> bool {
-        #[cfg(feature = "nan-boxing")]
-        {
-            // NOTE(aalhendi): IEEE specs lists NaN != NaN
-            // this ensures “real” arithmetic NaNs produced in lox are not equal to themselves
-            if a.is_number() && b.is_number() {
-                return a.as_number() == b.as_number();
-            }
-            a == b
+impl PartialEq for Value {
+    #[cfg(feature = "nan-boxing")]
+    fn eq(&self, other: &Self) -> bool {
+        // NOTE(aalhendi): IEEE specs lists NaN != NaN
+        // this ensures “real” arithmetic NaNs produced in lox are not equal to themselves
+        if self.is_number() && other.is_number() {
+            return self.as_number() == other.as_number();
         }
-        #[cfg(not(feature = "nan-boxing"))]
-        {
-            if a.type_ != b.type_ {
-                return false;
-            }
-            match a.type_ {
-                ValueType::Bool => a.as_bool() == b.as_bool(),
-                ValueType::Nil => true,
-                ValueType::Number => a.as_number() == b.as_number(),
-                ValueType::Obj => a.as_obj() == b.as_obj(),
-            }
+        self.0 == other.0
+    }
+
+    #[cfg(not(feature = "nan-boxing"))]
+    fn eq(&self, other: &Self) -> bool {
+        if self.type_ != other.type_ {
+            return false;
+        }
+        match self.type_ {
+            ValueType::Bool => self.as_bool() == other.as_bool(),
+            ValueType::Nil => true,
+            ValueType::Number => self.as_number() == other.as_number(),
+            ValueType::Obj => self.as_obj() == other.as_obj(),
         }
     }
 }
