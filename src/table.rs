@@ -55,29 +55,9 @@ impl Table {
                             tombstone = entry;
                         }
                     }
-                // TODO(aalhendi): ideally, it should work this way. BUT!
-                // I pass key as *mut ObjString.... somewhere I use chars.as_ptr()... token.lexeme is of type String
-                // anyway because its an owned copy its alloc'ed diff and not same ptr.
-                // so tldr; use single copy of source string and rewrite scanner and parser like book :)!
-                // } else if (*entry).key == key {
-                //     // We found the key.
-                //     return entry;
-                } else if (*(*entry).key).length == (*key).length
-                    && (*(*entry).key).hash == (*key).hash
-                {
-                    let mut is_same = true;
-                    for c in 0..(*key).length as usize {
-                        if *((*(*entry).key).chars.wrapping_add(c))
-                            != (*(*key).chars.wrapping_add(c))
-                        {
-                            is_same = false;
-                            break;
-                        }
-                    }
-                    // memcmp result
-                    if is_same {
-                        return entry;
-                    }
+                } else if (*entry).key == key {
+                    // We found the key.
+                    return entry;
                 }
 
                 index = (index + 1) & (capacity as u32 - 1);
