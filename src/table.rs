@@ -1,5 +1,5 @@
 use crate::{
-    memory::{mark_object, mark_value, reallocate},
+    memory::{self, mark_object, mark_value, reallocate},
     object::{Obj, ObjString},
     value::Value,
     ALLOCATE, FREE_ARRAY, GROW_CAPACITY,
@@ -163,7 +163,7 @@ impl Table {
             return std::ptr::null_mut();
         }
 
-        let mut index = hash % self.capacity as u32;
+        let mut index = hash & (self.capacity as u32 - 1);
         loop {
             unsafe {
                 let entry = self.entries.offset(index as isize);
@@ -172,24 +172,15 @@ impl Table {
                     if (*entry).value.is_nil() {
                         return std::ptr::null_mut();
                     }
-                } else if (*(*entry).key).length as usize == length && (*(*entry).key).hash == hash
+                } else if (*(*entry).key).length as usize == length
+                    && (*(*entry).key).hash == hash
+                    && memory::memcmp((*(*entry).key).chars, chars, length) == 0
                 {
-                    // TODO(aalhendi): ghetto memcmp, refactor into fn in memory.rs
-                    let mut is_same = true;
-                    for c in 0..length {
-                        if *((*(*entry).key).chars.wrapping_add(c)) != (*chars.wrapping_add(c)) {
-                            is_same = false;
-                            break;
-                        }
-                    }
-                    // memcmp result
-                    if is_same {
-                        // We found it.
-                        return (*entry).key;
-                    }
+                    // We found it.
+                    return (*entry).key;
                 }
             }
-            index = (index + 1) % self.capacity as u32;
+            index = (index + 1) & (self.capacity as u32 - 1);
         }
     }
 

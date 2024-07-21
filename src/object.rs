@@ -114,7 +114,7 @@ impl ObjString {
         unsafe {
             let interned = VM.strings.find_string(chars, length, hash);
             if !interned.is_null() {
-                FREE_ARRAY!(u8, chars, length + 1); // TODO(aalhendi): verify +1
+                FREE_ARRAY!(u8, chars, length);
                 return interned;
             }
         }

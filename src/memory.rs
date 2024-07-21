@@ -149,7 +149,7 @@ fn free_object(object: *mut Obj) {
         match (*object).type_ {
             ObjType::String => {
                 let string = object as *mut ObjString;
-                FREE_ARRAY!(u8, (*string).chars, (*string).length as usize + 1);
+                FREE_ARRAY!(u8, (*string).chars, (*string).length as usize);
                 FREE!(ObjString, object);
             }
             ObjType::Function => {
@@ -374,4 +374,17 @@ fn sweep() {
             }
         }
     }
+}
+
+/// Returns an integer less than, equal to, or greater than zero if `s1` is found,
+/// respectively, to be less than, to match, or be greater than `s2`.
+pub unsafe fn memcmp(s1: *const u8, s2: *const u8, n: usize) -> i32 {
+    for i in 0..n {
+        let a = *s1.add(i);
+        let b = *s2.add(i);
+        if a != b {
+            return a as i32 - b as i32;
+        }
+    }
+    0
 }

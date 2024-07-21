@@ -1,5 +1,5 @@
 # TODO
 
-- Rework strings.
-  - Nuke null terminator.
-  - Nuke as_cstring.
+- Rework strings. Support ASCII. test/string/literals.lox
+- Pass test/field/many.lox
+
