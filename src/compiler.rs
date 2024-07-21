@@ -82,7 +82,7 @@ pub struct Parser {
 }
 
 impl Parser {
-    pub const fn new(source: String) -> Self {
+    pub const fn new(source: &'static str) -> Self {
         Self {
             previous: Token::undefined(),
             current: Token::undefined(),
@@ -620,7 +620,7 @@ impl Parser {
                 unsafe {
                     (*(*CURRENT).function).arity += 1;
                     if (*(*CURRENT).function).arity > u8::MAX as isize {
-                        self.error_at_current("Can't have more than 255 parameters.".to_owned());
+                        self.error_at_current("Can't have more than 255 parameters.");
                     }
                 }
 
@@ -995,7 +995,7 @@ impl Parser {
                 break;
             }
 
-            self.error_at_current(self.current.lexeme.clone());
+            self.error_at_current(self.current.lexeme);
         }
     }
 
@@ -1003,19 +1003,19 @@ impl Parser {
         if self.current.kind == kind {
             self.advance();
         } else {
-            self.error_at_current(message.to_owned());
+            self.error_at_current(message);
         }
     }
 
-    fn error_at_current(&mut self, message: String) {
+    fn error_at_current(&mut self, message: &str) {
         self.error_at(&self.current.clone(), message);
     }
 
     fn error(&mut self, message: &str) {
-        self.error_at(&self.previous.clone(), message.to_owned());
+        self.error_at(&self.previous.clone(), message);
     }
 
-    fn error_at(&mut self, token: &Token, message: String) {
+    fn error_at(&mut self, token: &Token, message: &str) {
         if self.panic_mode {
             return;
         }
@@ -1058,7 +1058,7 @@ pub struct Upvalue {
     is_local: bool,
 }
 
-pub fn compile(source: String) -> *mut ObjFunction {
+pub fn compile(source: &'static str) -> *mut ObjFunction {
     unsafe {
         PARSER = Parser::new(source);
         COMPILER.init(FunctionType::Script);

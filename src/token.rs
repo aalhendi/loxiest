@@ -3,23 +3,19 @@ use std::fmt::Display;
 #[derive(Debug, Clone, PartialEq)]
 pub struct Token {
     pub kind: TokenType,
-    pub lexeme: String,
+    pub lexeme: &'static str,
     pub line: usize,
 }
 
 impl Token {
-    pub fn new(kind: TokenType, lexeme: &str, line: usize) -> Token {
-        Token {
-            kind,
-            lexeme: lexeme.to_owned(),
-            line,
-        }
+    pub fn new(kind: TokenType, lexeme: &'static str, line: usize) -> Token {
+        Token { kind, lexeme, line }
     }
 
     pub const fn undefined() -> Self {
         Self {
             kind: TokenType::Undefined,
-            lexeme: String::new(),
+            lexeme: "",
             line: 0,
         }
     }

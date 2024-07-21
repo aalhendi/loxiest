@@ -432,7 +432,7 @@ impl VM {
         }
     }
 
-    pub fn interpret(&mut self, source: String) -> Result<(), InterpretResult> {
+    pub fn interpret(&mut self, source: &'static str) -> Result<(), InterpretResult> {
         let function = compile(source);
         if function.is_null() {
             return Err(InterpretResult::CompileError);

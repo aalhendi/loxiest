@@ -3,10 +3,12 @@
 #![allow(unused_imports)]
 
 use std::{
+    cell::UnsafeCell,
     env, fs,
     io::{self, BufRead, Write},
     mem::MaybeUninit,
     ptr::addr_of_mut,
+    sync::Once,
 };
 
 use chunk::{Chunk, OpCode};
@@ -24,6 +26,9 @@ mod token;
 mod value;
 mod vm;
 
+// Global storage for the current lines
+static mut CURRENT_LINE: String = String::new();
+static mut GLOBAL_SOURCE: String = String::new();
 // NOTE(aalhendi): Cant use MaybeUninit::uninit().assume_init() because static variables
 // must be initialized with a constant value or an expression that can be evaluated at compile-time.
 pub static mut VM: VM = unsafe { std::mem::zeroed() };
@@ -32,7 +37,7 @@ pub static mut COMPILING_CHUNK: *mut Chunk = unsafe { std::mem::zeroed() };
 pub static mut CURRENT: *mut Compiler2 = std::ptr::null_mut();
 pub static mut CURRENT_CLASS: *mut ClassCompiler = std::ptr::null_mut();
 pub static mut COMPILER: Compiler2 = Compiler2::new_uninit();
-pub static mut PARSER: compiler::Parser = Parser::new(String::new());
+pub static mut PARSER: compiler::Parser = Parser::new("");
 
 fn main() {
     unsafe {
@@ -58,7 +63,9 @@ fn run_file(vm: *mut VM, file_path: &str) -> io::Result<()> {
     let contents = fs::read_to_string(file_path)?;
     // EX_DATAERR (65) User input data was incorrect in some way.
     // EX_SOFTWARE (70) Internal software error. Limited to non-OS errors.
-    match unsafe { (*vm).interpret(contents) } {
+
+    unsafe { GLOBAL_SOURCE = contents };
+    match unsafe { (*vm).interpret(GLOBAL_SOURCE.as_str()) } {
         Ok(()) => Ok(()),
         Err(e) => match e {
             vm::InterpretResult::CompileError => std::process::exit(65),
@@ -79,12 +86,20 @@ fn repl(vm: *mut VM) {
                     break;
                 }
 
+                let static_line = get_static_str(line);
                 // TODO: Discarded result
-                let _ = unsafe { (*vm).interpret(line) };
+                let _ = unsafe { (*vm).interpret(static_line) };
                 print!("> ");
                 io::stdout().flush().expect("Unable to flush stdout");
             }
             Err(e) => panic!("{e}"),
         }
+    }
+}
+
+fn get_static_str(s: String) -> &'static str {
+    unsafe {
+        CURRENT_LINE = s;
+        CURRENT_LINE.as_str()
     }
 }
