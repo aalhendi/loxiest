@@ -292,7 +292,7 @@ impl Parser {
         }
 
         unsafe {
-            CURRENT_CLASS = class_compiler.enclosing;
+            CURRENT_CLASS = (*CURRENT_CLASS).enclosing;
         }
     }
 

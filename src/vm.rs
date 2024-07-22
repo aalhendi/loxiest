@@ -423,6 +423,7 @@ impl VM {
                             &mut (*subclass).methods,
                         );
                     }
+                    self.pop(); // Subclass
                 }
                 OpCode::Method => {
                     let name = READ_STRING!(self);
