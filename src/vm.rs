@@ -117,7 +117,7 @@ impl VM {
         let mut frame = self.get_frame();
 
         macro_rules! READ_BYTE {
-            ($self:expr) => {{
+            () => {{
                 #[allow(unused_unsafe)]
                 unsafe {
                     let byte = *(*frame).ip;
@@ -128,7 +128,7 @@ impl VM {
         }
 
         macro_rules! READ_SHORT {
-            ($self:expr) => {{
+            () => {{
                 unsafe {
                     let short = {
                         let bytes = std::slice::from_raw_parts((*frame).ip, 2);
@@ -141,8 +141,8 @@ impl VM {
         }
 
         macro_rules! READ_CONSTANT {
-            ($self:expr) => {{
-                let constant_index = READ_BYTE!($self) as usize;
+            () => {{
+                let constant_index = READ_BYTE!() as usize;
                 #[allow(unused_unsafe)]
                 unsafe {
                     *(*(*(*frame).closure).function)
@@ -155,8 +155,8 @@ impl VM {
         }
 
         macro_rules! READ_STRING {
-            ($self:expr) => {{
-                READ_CONSTANT!($self).as_string()
+            () => {{
+                READ_CONSTANT!().as_string()
             }};
         }
 
@@ -183,19 +183,19 @@ impl VM {
                 }
             }
 
-            let instruction = OpCode::from(READ_BYTE!(self));
+            let instruction = OpCode::from(READ_BYTE!());
             match instruction {
                 OpCode::Print => {
                     println!("{}", self.pop());
                 }
                 OpCode::Jump => {
-                    let offset = READ_SHORT!(self);
+                    let offset = READ_SHORT!();
                     unsafe {
                         (*frame).ip = (*frame).ip.wrapping_add(offset as usize);
                     }
                 }
                 OpCode::JumpIfFalse => {
-                    let offset = READ_SHORT!(self);
+                    let offset = READ_SHORT!();
                     if self.peek(0).is_falsey() {
                         unsafe {
                             (*frame).ip = (*frame).ip.wrapping_add(offset as usize);
@@ -203,13 +203,13 @@ impl VM {
                     }
                 }
                 OpCode::Loop => {
-                    let offset = READ_SHORT!(self);
+                    let offset = READ_SHORT!();
                     unsafe {
                         (*frame).ip = (*frame).ip.wrapping_sub(offset as usize);
                     }
                 }
                 OpCode::Call => {
-                    let arg_count = READ_BYTE!(self);
+                    let arg_count = READ_BYTE!();
                     let value = self.peek(arg_count as isize);
                     if !self.call_value(value, arg_count) {
                         return Err(InterpretResult::RuntimeError);
@@ -217,16 +217,16 @@ impl VM {
                     frame = self.get_frame();
                 }
                 OpCode::Invoke => {
-                    let method = READ_STRING!(self);
-                    let arg_count = READ_BYTE!(self);
+                    let method = READ_STRING!();
+                    let arg_count = READ_BYTE!();
                     if !self.invoke(method, arg_count) {
                         return Err(InterpretResult::RuntimeError);
                     }
                     frame = self.get_frame();
                 }
                 OpCode::SuperInvoke => {
-                    let method = READ_STRING!(self);
-                    let arg_count = READ_BYTE!(self);
+                    let method = READ_STRING!();
+                    let arg_count = READ_BYTE!();
                     let superclass = self.pop().as_class();
                     if !self.invoke_from_class(superclass, method, arg_count) {
                         return Err(InterpretResult::RuntimeError);
@@ -234,12 +234,12 @@ impl VM {
                     frame = self.get_frame();
                 }
                 OpCode::Closure => {
-                    let function = READ_CONSTANT!(self).as_function();
+                    let function = READ_CONSTANT!().as_function();
                     let closure = ObjClosure2::new(function);
                     self.push(Value::obj_val(closure));
                     for i in 0..unsafe { (*closure).upvalue_count } {
-                        let is_local = READ_BYTE!(self);
-                        let index = READ_BYTE!(self);
+                        let is_local = READ_BYTE!();
+                        let index = READ_BYTE!();
                         if is_local != 0 {
                             unsafe {
                                 let local = (*frame).slots.wrapping_add(index as usize);
@@ -272,7 +272,7 @@ impl VM {
                     self.push(result);
                 }
                 OpCode::Constant => {
-                    let constant = READ_CONSTANT!(self);
+                    let constant = READ_CONSTANT!();
                     self.push(constant);
                 }
                 OpCode::Negate => {
@@ -290,18 +290,18 @@ impl VM {
                     self.pop();
                 }
                 OpCode::GetLocal => {
-                    let slot = READ_BYTE!(self);
+                    let slot = READ_BYTE!();
                     let val = unsafe { *(*frame).slots.wrapping_add(slot as usize) };
                     self.push(val);
                 }
                 OpCode::SetLocal => {
-                    let slot = READ_BYTE!(self);
+                    let slot = READ_BYTE!();
                     unsafe {
                         *(*frame).slots.wrapping_add(slot as usize) = self.peek(0);
                     }
                 }
                 OpCode::GetGlobal => {
-                    let name = READ_STRING!(self);
+                    let name = READ_STRING!();
                     if let Some(value) = self.globals.get(name) {
                         self.push(value);
                     } else {
@@ -313,12 +313,12 @@ impl VM {
                     }
                 }
                 OpCode::DefineGlobal => {
-                    let name = READ_STRING!(self);
+                    let name = READ_STRING!();
                     self.globals.set(name, self.peek(0));
                     self.pop();
                 }
                 OpCode::SetGlobal => {
-                    let name = READ_STRING!(self);
+                    let name = READ_STRING!();
 
                     if self.globals.set(name, self.peek(0)) {
                         self.globals.delete(name);
@@ -330,14 +330,13 @@ impl VM {
                     }
                 }
                 OpCode::GetUpvalue => {
-                    let slot = READ_BYTE!(self) as usize;
-                    let v = unsafe {
-                        *(*(*(*(*frame).closure).upvalues.wrapping_add(slot))).location
-                    };
+                    let slot = READ_BYTE!() as usize;
+                    let v =
+                        unsafe { *(*(*(*(*frame).closure).upvalues.wrapping_add(slot))).location };
                     self.push(v);
                 }
                 OpCode::SetUpvalue => {
-                    let slot = READ_BYTE!(self) as usize;
+                    let slot = READ_BYTE!() as usize;
                     unsafe {
                         *(*(*(*(*frame).closure).upvalues.wrapping_add(slot))).location =
                             self.peek(0);
@@ -351,7 +350,7 @@ impl VM {
 
                     let instance = self.peek(1).as_instance();
                     unsafe {
-                        (*instance).fields.set(READ_STRING!(self), self.peek(0));
+                        (*instance).fields.set(READ_STRING!(), self.peek(0));
                         let value = self.pop();
                         self.pop();
                         self.push(value);
@@ -363,7 +362,7 @@ impl VM {
                         return Err(InterpretResult::RuntimeError);
                     }
                     let instance = self.peek(0).as_instance();
-                    let name = READ_STRING!(self);
+                    let name = READ_STRING!();
                     if let Some(value) = unsafe { (*instance).fields.get(name) } {
                         self.pop(); // instance
                         self.push(value);
@@ -372,7 +371,7 @@ impl VM {
                     }
                 }
                 OpCode::GetSuper => {
-                    let name = READ_STRING!(self);
+                    let name = READ_STRING!();
                     let superclass = self.pop().as_class();
 
                     if !self.bind_method(superclass, name) {
@@ -407,7 +406,7 @@ impl VM {
                     self.push(v)
                 }
                 OpCode::Class => {
-                    let v = Value::obj_val(ObjClass2::new(READ_STRING!(self)));
+                    let v = Value::obj_val(ObjClass2::new(READ_STRING!()));
                     self.push(v);
                 }
                 OpCode::Inherit => {
@@ -426,7 +425,7 @@ impl VM {
                     self.pop(); // Subclass
                 }
                 OpCode::Method => {
-                    let name = READ_STRING!(self);
+                    let name = READ_STRING!();
                     self.define_method(name);
                 }
             }
