@@ -239,6 +239,13 @@ fn mark_roots() {
             slot = slot.offset(1);
         }
 
+        let mut i = 0;
+        while i < VM.frame_count {
+            mark_object(VM.frames[i].closure as *mut Obj);
+
+            i += 1;
+        }
+
         let mut upvalue = VM.open_upvalues;
         while !upvalue.is_null() {
             mark_object(upvalue as *mut Obj);

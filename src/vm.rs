@@ -48,8 +48,8 @@ pub struct CallFrame {
 }
 
 pub struct VM {
-    frames: [CallFrame; FRAMES_MAX],
-    frame_count: usize,
+    pub frames: [CallFrame; FRAMES_MAX],
+    pub frame_count: usize,
 
     pub stack: [Value; STACK_MAX],
     pub stack_top: *mut Value,
