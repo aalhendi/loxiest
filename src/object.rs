@@ -88,10 +88,17 @@ pub struct ObjString {
 
 impl Display for ObjString {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        for i in 0..self.length {
-            unsafe { write!(f, "{}", (*self.chars.offset(i)) as char)? }
+        let slice = unsafe { std::slice::from_raw_parts(self.chars, self.length as usize) };
+        match std::str::from_utf8(slice) {
+            Ok(s) => write!(f, "{s}"),
+            Err(_) => {
+                // Not valid UTF-8, fall back to printing raw bytes
+                for &byte in slice {
+                    write!(f, "{:02x}", byte)?;
+                }
+                Ok(())
+            }
         }
-        Ok(())
     }
 }
 

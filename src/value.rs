@@ -267,11 +267,6 @@ impl Value {
         }
     }
 
-    // TODO(aalhendi): rename to as_native_string?
-    pub fn as_cstring(&self) -> *mut u8 {
-        unsafe { (*self.as_string()).chars }
-    }
-
     pub fn as_function(&self) -> *mut ObjFunction {
         #[cfg(not(feature = "nan-boxing"))]
         {
