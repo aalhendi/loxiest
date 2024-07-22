@@ -202,7 +202,11 @@ impl Value {
         #[cfg(feature = "nan-boxing")]
         {
             // SAFETY: transmuting a ptr to u64, relies on ptr being 64-bit and is unsafe.
-            unsafe { Value(SIGN_BIT | QNAN | std::mem::transmute::<*mut T, u64>(object)) }
+            #[allow(clippy::transmutes_expressible_as_ptr_casts)]
+            // NOTE(aalhendi): Workaround to avoid error "pointers cannot be cast to integers during const eval"
+            unsafe {
+                Value(SIGN_BIT | QNAN | std::mem::transmute::<*mut T, u64>(object))
+            }
         }
 
         #[cfg(not(feature = "nan-boxing"))]

@@ -467,7 +467,7 @@ impl Parser {
         self.patch_jump(else_jump);
     }
 
-    fn emit_jump<T: Into<u8>>(&mut self, instruction: T) -> isize {
+    fn emit_jump<T: Into<u8>>(&mut self, instruction: T) -> usize {
         self.emit_byte(instruction);
         self.emit_byte(0xff);
         self.emit_byte(0xff);
@@ -475,17 +475,17 @@ impl Parser {
         unsafe { (*self.current_chunk()).count - 2 }
     }
 
-    fn patch_jump(&mut self, offset: isize) {
+    fn patch_jump(&mut self, offset: usize) {
         // -2 to adjust for the bytecode for the jump offset itself.
         let jump = unsafe { (*self.current_chunk()).count } - offset - 2;
 
-        if jump > u16::MAX as isize {
+        if jump > u16::MAX as usize {
             self.error("Too much code to jump over.");
         }
 
         unsafe {
-            *(*self.current_chunk()).code.offset(offset) = ((jump >> 8) & 0xff) as u8;
-            *(*self.current_chunk()).code.offset(offset + 1) = (jump & 0xff) as u8;
+            *(*self.current_chunk()).code.add(offset) = ((jump >> 8) & 0xff) as u8;
+            *(*self.current_chunk()).code.add(offset + 1) = (jump & 0xff) as u8;
         }
     }
 
@@ -518,17 +518,17 @@ impl Parser {
         unsafe { (*self.current_chunk()).write(byte.into(), self.previous.line) };
     }
 
-    fn emit_loop(&mut self, loop_start: isize) {
+    fn emit_loop(&mut self, loop_start: usize) {
         self.emit_byte(OpCode::Loop);
 
         // +2 to adjust for bytecode for OP_LOOP offset itself
         let offset = unsafe { (*self.current_chunk()).count - loop_start + 2 };
-        if offset > u16::MAX as isize {
+        if offset > u16::MAX as usize {
             self.error("Loop body too large.");
         }
 
-        self.emit_byte(((offset >> 8) & u8::MAX as isize) as u8);
-        self.emit_byte((offset & u8::MAX as isize) as u8);
+        self.emit_byte(((offset >> 8) & u8::MAX as usize) as u8);
+        self.emit_byte((offset & u8::MAX as usize) as u8);
     }
 
     fn end_compiler(&mut self) -> *mut ObjFunction {

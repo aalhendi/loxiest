@@ -8,8 +8,8 @@ use crate::{
 const TABLE_MAX_LOAD: f64 = 0.75;
 
 pub struct Table {
-    count: isize,
-    capacity: isize,
+    count: usize,
+    capacity: usize,
     entries: *mut Entry,
 }
 
@@ -26,7 +26,7 @@ impl Table {
     }
 
     pub fn free(&mut self) {
-        FREE_ARRAY!(Entry, self.entries, self.capacity as usize);
+        FREE_ARRAY!(Entry, self.entries, self.capacity);
         self.init();
     }
 
@@ -34,7 +34,7 @@ impl Table {
         &mut self,
         entries: *mut Entry,
         key: *mut ObjString,
-        capacity: isize,
+        capacity: usize,
     ) -> *mut Entry {
         unsafe {
             let mut index: u32 = (*key).hash & (capacity as u32 - 1);
@@ -81,19 +81,19 @@ impl Table {
     }
 
     // NOTE(aalhendi): might have to move this as own fn if GC breaks.
-    fn adjust_capcity(&mut self, capacity: isize) {
-        let entries = ALLOCATE!(Entry, capacity as usize);
+    fn adjust_capcity(&mut self, capacity: usize) {
+        let entries = ALLOCATE!(Entry, capacity);
         for i in 0..capacity {
             unsafe {
-                (*entries.offset(i)).key = std::ptr::null_mut();
-                (*entries.offset(i)).value = Value::nil_val();
+                (*entries.add(i)).key = std::ptr::null_mut();
+                (*entries.add(i)).value = Value::nil_val();
             }
         }
 
         self.count = 0;
         for i in 0..self.capacity {
             unsafe {
-                let entry = self.entries.offset(i);
+                let entry = self.entries.add(i);
                 if (*entry).key.is_null() {
                     continue;
                 }
@@ -105,13 +105,13 @@ impl Table {
             }
         }
 
-        FREE_ARRAY!(Entry, self.entries, self.capacity as usize);
+        FREE_ARRAY!(Entry, self.entries, self.capacity);
         self.entries = entries;
         self.capacity = capacity;
     }
 
     pub fn set(&mut self, key: *mut ObjString, value: Value) -> bool {
-        if self.count + 1 > (self.capacity as f64 * TABLE_MAX_LOAD) as isize {
+        if self.count + 1 > (self.capacity as f64 * TABLE_MAX_LOAD) as usize {
             let capacity = GROW_CAPACITY!(self.capacity);
             self.adjust_capcity(capacity);
         }
@@ -150,7 +150,7 @@ impl Table {
     pub fn add_all(from: *mut Table, to: *mut Table) {
         unsafe {
             for i in 0..(*from).capacity {
-                let entry = (*from).entries.offset(i);
+                let entry = (*from).entries.add(i);
                 if !(*entry).key.is_null() {
                     (*to).set((*entry).key, (*entry).value);
                 }
@@ -187,7 +187,7 @@ impl Table {
     pub fn remove_white(&mut self) {
         for i in 0..self.capacity {
             unsafe {
-                let entry = self.entries.offset(i);
+                let entry = self.entries.add(i);
                 if !(*entry).key.is_null() && !(*(*entry).key).obj.is_marked {
                     self.delete((*entry).key);
                 }
@@ -198,7 +198,7 @@ impl Table {
     pub fn mark(&mut self) {
         for i in 0..self.capacity {
             unsafe {
-                let entry = self.entries.offset(i);
+                let entry = self.entries.add(i);
                 mark_object((*entry).key as *mut Obj);
                 mark_value((*entry).value);
             }

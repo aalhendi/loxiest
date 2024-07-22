@@ -144,8 +144,8 @@ impl From<u8> for OpCode {
 }
 
 pub struct Chunk {
-    capacity: isize,
-    pub count: isize,
+    capacity: usize,
+    pub count: usize,
     pub code: *mut u8,
     pub lines: *mut usize,
     pub constants: ValueArray,
@@ -162,8 +162,8 @@ impl Chunk {
     }
 
     pub fn free(&mut self) {
-        FREE_ARRAY!(u8, self.code, self.capacity as usize);
-        FREE_ARRAY!(usize, self.lines, self.capacity as usize);
+        FREE_ARRAY!(u8, self.code, self.capacity);
+        FREE_ARRAY!(usize, self.lines, self.capacity);
         self.constants.free();
         self.init();
     }
@@ -172,18 +172,18 @@ impl Chunk {
         if self.capacity < self.count + 1 {
             let old_capacity = self.capacity;
             self.capacity = GROW_CAPACITY!(old_capacity);
-            self.code = GROW_ARRAY!(u8, self.code, old_capacity as usize, self.capacity as usize);
+            self.code = GROW_ARRAY!(u8, self.code, old_capacity, self.capacity);
             self.lines = GROW_ARRAY!(
                 usize,
                 self.lines,
-                old_capacity as usize,
-                self.capacity as usize
+                old_capacity,
+                self.capacity
             );
         }
 
         unsafe {
-            *self.code.offset(self.count) = byte;
-            *self.lines.offset(self.count) = line;
+            *self.code.add(self.count) = byte;
+            *self.lines.add(self.count) = line;
         }
         self.count += 1;
     }
