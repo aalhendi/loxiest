@@ -133,8 +133,8 @@ impl ObjString {
 #[repr(C)]
 pub struct ObjFunction {
     obj: Obj,
-    pub arity: isize,
-    pub upvalue_count: isize,
+    pub arity: u32,
+    pub upvalue_count: u32,
     pub chunk: Chunk,
     pub name: *mut ObjString,
 }
@@ -196,7 +196,7 @@ pub struct ObjClosure {
     obj: Obj,
     pub function: *mut ObjFunction,
     pub upvalues: *mut *mut ObjUpvalue,
-    pub upvalue_count: isize,
+    pub upvalue_count: u32,
 }
 
 impl ObjClosure {
@@ -204,7 +204,7 @@ impl ObjClosure {
         unsafe {
             let upvalues = ALLOCATE!(*mut ObjUpvalue, (*function).upvalue_count as usize);
             for i in 0..(*function).upvalue_count {
-                *upvalues.offset(i) = std::ptr::null_mut();
+                *upvalues.wrapping_add(i as usize) = std::ptr::null_mut();
             }
 
             let closure = ALLOCATE_OBJ!(ObjClosure, ObjType::Closure);

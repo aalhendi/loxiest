@@ -13,7 +13,7 @@ use crate::{
     VM,
 };
 
-const GC_HEAP_GROWTH_FACTOR: usize = 2;
+const GC_HEAP_GROWTH_FACTOR: u32 = 2;
 
 pub fn reallocate(
     pointer: *mut std::ffi::c_void,
@@ -21,9 +21,8 @@ pub fn reallocate(
     new_size: usize,
 ) -> *mut std::ffi::c_void {
     unsafe {
-        VM.bytes_allocated = VM
-            .bytes_allocated
-            .wrapping_add(new_size.wrapping_sub(old_size));
+        let bytes_allocated = VM.bytes_allocated as usize;
+        VM.bytes_allocated = bytes_allocated.wrapping_add(new_size.wrapping_sub(old_size)) as u32;
     }
     if new_size > old_size {
         if cfg!(feature = "debug-stress-gc") {
@@ -198,7 +197,7 @@ pub fn free_objects() {
             object = next;
         }
 
-        let layout = Layout::array::<*mut Obj>(VM.gray_capacity).unwrap();
+        let layout = Layout::array::<*mut Obj>(VM.gray_capacity as usize).unwrap();
         dealloc(VM.gray_stack as *mut u8, layout);
     }
 }
@@ -241,7 +240,7 @@ fn mark_roots() {
 
         let mut i = 0;
         while i < VM.frame_count {
-            mark_object(VM.frames[i].closure as *mut Obj);
+            mark_object(VM.frames[i as usize].closure as *mut Obj);
 
             i += 1;
         }
@@ -270,7 +269,7 @@ pub fn mark_value(value: Value) {
 
 fn mark_array(array: &mut ValueArray) {
     for i in 0..array.count {
-        mark_value(unsafe { *array.values.offset(i) });
+        mark_value(unsafe { *array.values.wrapping_add(i as usize) });
     }
 }
 
@@ -292,7 +291,7 @@ fn blacken_object(object: *mut Obj) {
                 let closure = object as *mut ObjClosure;
                 mark_object((*closure).function as *mut Obj);
                 for i in 0..(*closure).upvalue_count {
-                    mark_object((*closure).upvalues.offset(i) as *mut Obj);
+                    mark_object((*closure).upvalues.wrapping_add(i as usize) as *mut Obj);
                 }
             }
             ObjType::Upvalue => mark_value((*(object as *mut ObjUpvalue)).closed),
@@ -337,15 +336,15 @@ pub fn mark_object(object: *mut Obj) {
             // memory for the gray stack itself is not managed by the garbage collector
             VM.gray_stack = realloc(
                 VM.gray_stack as *mut u8,
-                Layout::array::<*mut Obj>(VM.gray_capacity).unwrap(),
-                std::mem::size_of::<*mut Obj>() * VM.gray_capacity,
+                Layout::array::<*mut Obj>(VM.gray_capacity as usize).unwrap(),
+                std::mem::size_of::<*mut Obj>() * VM.gray_capacity as usize,
             ) as *mut *mut Obj;
 
             if VM.gray_stack.is_null() {
                 std::process::exit(1);
             }
         }
-        *VM.gray_stack.wrapping_add(VM.gray_count) = object;
+        *VM.gray_stack.wrapping_add(VM.gray_count as usize) = object;
         VM.gray_count += 1;
     }
 }
@@ -354,7 +353,7 @@ fn trace_references() {
     unsafe {
         while VM.gray_count > 0 {
             VM.gray_count -= 1;
-            let object = *VM.gray_stack.wrapping_add(VM.gray_count);
+            let object = *VM.gray_stack.wrapping_add(VM.gray_count as usize);
             blacken_object(object);
         }
     }

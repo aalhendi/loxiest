@@ -143,10 +143,10 @@ impl From<u8> for OpCode {
 }
 
 pub struct Chunk {
-    capacity: usize,
-    pub count: usize,
+    capacity: u32,
+    pub count: u32,
     pub code: *mut u8,
-    pub lines: *mut usize,
+    pub lines: *mut u32,
     pub constants: ValueArray,
 }
 
@@ -164,28 +164,28 @@ impl Default for Chunk {
 
 impl Chunk {
     pub fn free(&mut self) {
-        FREE_ARRAY!(u8, self.code, self.capacity);
-        FREE_ARRAY!(usize, self.lines, self.capacity);
+        FREE_ARRAY!(u8, self.code as usize, self.capacity as usize);
+        FREE_ARRAY!(u32, self.lines as usize, self.capacity as usize);
         self.constants.free();
         *self = Self::default();
     }
 
-    pub fn write(&mut self, byte: u8, line: usize) {
+    pub fn write(&mut self, byte: u8, line: u32) {
         if self.capacity < self.count + 1 {
             let old_capacity = self.capacity;
             self.capacity = GROW_CAPACITY!(old_capacity);
-            self.code = GROW_ARRAY!(u8, self.code, old_capacity, self.capacity);
-            self.lines = GROW_ARRAY!(usize, self.lines, old_capacity, self.capacity);
+            self.code = GROW_ARRAY!(u8, self.code, old_capacity as usize, self.capacity as usize);
+            self.lines = GROW_ARRAY!(u32, self.lines, old_capacity as usize, self.capacity as usize);
         }
 
         unsafe {
-            *self.code.add(self.count) = byte;
-            *self.lines.add(self.count) = line;
+            *self.code.add(self.count as usize) = byte;
+            *self.lines.add(self.count as usize) = line;
         }
         self.count += 1;
     }
 
-    pub fn add_constant(&mut self, value: Value) -> isize {
+    pub fn add_constant(&mut self, value: Value) -> u32 {
         unsafe { VM.push(value) };
         self.constants.write(value);
         unsafe { VM.pop() };
@@ -197,23 +197,23 @@ impl Chunk {
         println!("== {name} ==");
 
         let mut offset = 0;
-        while offset < self.count as usize {
+        while offset < self.count {
             offset = self.disassemble_instruction(offset);
         }
     }
 
     #[cfg(feature = "debug-print-code")]
-    pub fn disassemble_instruction(&self, offset: usize) -> usize {
+    pub fn disassemble_instruction(&self, offset: u32) -> u32 {
         print!("{offset:04} ");
 
-        let line = unsafe { *self.lines.wrapping_add(offset) };
-        if offset > 0 && line == unsafe { *self.lines.wrapping_add(offset - 1) } {
+        let line = unsafe { *self.lines.wrapping_add(offset as usize) };
+        if offset > 0 && line == unsafe { *self.lines.wrapping_add(offset as usize - 1) } {
             print!("   | ");
         } else {
             print!("{line:4} ");
         }
 
-        let instruction = OpCode::from(unsafe { *self.code.wrapping_add(offset) });
+        let instruction = OpCode::from(unsafe { *self.code.wrapping_add(offset as usize) });
         match instruction {
             OpCode::Return
             | OpCode::Negate
@@ -257,7 +257,7 @@ impl Chunk {
             OpCode::Invoke | OpCode::SuperInvoke => self.invoke_instruction(instruction, offset),
 
             OpCode::Closure => {
-                let mut idx = offset + 1;
+                let mut idx = offset as usize + 1;
                 let constant_idx = unsafe { *self.code.wrapping_add(idx) as usize };
                 idx += 1;
                 print!("{name:-16} {constant_idx:4} ", name = "OP_CLOSURE");
@@ -281,29 +281,29 @@ impl Chunk {
                     );
                 }
 
-                idx
+                idx as u32
             }
         }
     }
 
     #[cfg(any(feature = "debug-trace-execution", feature = "debug-print-code"))]
-    fn simple_instruction(&self, code: OpCode, offset: usize) -> usize {
+    fn simple_instruction(&self, code: OpCode, offset: u32) -> u32 {
         println!("{code}");
         offset + 1
     }
 
     #[cfg(any(feature = "debug-trace-execution", feature = "debug-print-code"))]
-    fn byte_instruction(&self, name: OpCode, offset: usize) -> usize {
-        let slot = unsafe { *self.code.wrapping_add(offset + 1) };
+    fn byte_instruction(&self, name: OpCode, offset: u32) -> u32 {
+        let slot = unsafe { *self.code.wrapping_add(offset as usize + 1) };
         let name = name.to_string();
         println!("{name:-16} {slot:4}");
         offset + 2
     }
 
     #[cfg(any(feature = "debug-trace-execution", feature = "debug-print-code"))]
-    fn constant_instruction(&self, code: OpCode, offset: usize) -> usize {
+    fn constant_instruction(&self, code: OpCode, offset: u32) -> u32 {
         // TODO(aalhendi): check type
-        let constant_idx = unsafe { *self.code.wrapping_add(offset + 1) } as usize;
+        let constant_idx = unsafe { *self.code.wrapping_add(offset as usize + 1) } as usize;
         let name = code.to_string(); // This makes formatting work for some reason
         print!("{name:-16} {constant_idx:4} '");
         let value = unsafe { *self.constants.values.wrapping_add(constant_idx) };
@@ -312,26 +312,26 @@ impl Chunk {
     }
 
     #[cfg(any(feature = "debug-trace-execution", feature = "debug-print-code"))]
-    fn jump_instruction(&self, name: OpCode, is_neg: bool, offset: usize) -> usize {
+    fn jump_instruction(&self, name: OpCode, is_neg: bool, offset: u32) -> u32 {
         let name = name.to_string();
         let jump = unsafe {
-            (((*self.code.wrapping_add(offset + 1)) as u16) << 8)
-                | ((*self.code.wrapping_add(offset + 2)) as u16)
+            (((*self.code.wrapping_add(offset as usize + 1)) as u16) << 8)
+                | ((*self.code.wrapping_add(offset as usize + 2)) as u16)
         };
 
         // NOTE: This could underflow and that would be a bug in the impl so it shouldn't.
         let dst = match is_neg {
-            true => offset + 3 - jump as usize,
-            false => offset + 3 + jump as usize,
+            true => offset + 3 - jump as u32,
+            false => offset + 3 + jump as u32,
         };
         println!("{name:-16} {offset:4} -> {dst}",);
         offset + 3
     }
 
     #[cfg(any(feature = "debug-trace-execution", feature = "debug-print-code"))]
-    fn invoke_instruction(&self, name: OpCode, offset: usize) -> usize {
-        let constant_idx = unsafe { *self.code.wrapping_add(offset + 1) } as usize;
-        let arg_count = unsafe { *self.code.wrapping_add(offset + 2) } as usize;
+    fn invoke_instruction(&self, name: OpCode, offset: u32) -> u32 {
+        let constant_idx = unsafe { *self.code.wrapping_add(offset as usize + 1) } as usize;
+        let arg_count = unsafe { *self.code.wrapping_add(offset as usize + 2) } as u32;
         let name = name.to_string();
 
         print!("{name:-16} ({arg_count} args) {constant_idx:4} '");

@@ -457,7 +457,7 @@ impl Parser {
         self.patch_jump(else_jump);
     }
 
-    fn emit_jump<T: Into<u8>>(&mut self, instruction: T) -> usize {
+    fn emit_jump<T: Into<u8>>(&mut self, instruction: T) -> u32 {
         self.emit_byte(instruction);
         self.emit_byte(0xff);
         self.emit_byte(0xff);
@@ -465,17 +465,20 @@ impl Parser {
         unsafe { (*self.current_chunk()).count - 2 }
     }
 
-    fn patch_jump(&mut self, offset: usize) {
+    fn patch_jump(&mut self, offset: u32) {
         // -2 to adjust for the bytecode for the jump offset itself.
         let jump = unsafe { (*self.current_chunk()).count } - offset - 2;
 
-        if jump > u16::MAX as usize {
+        if jump > u16::MAX as u32 {
             self.error("Too much code to jump over.");
         }
 
         unsafe {
-            *(*self.current_chunk()).code.add(offset) = ((jump >> 8) & 0xff) as u8;
-            *(*self.current_chunk()).code.add(offset + 1) = (jump & 0xff) as u8;
+            *(*self.current_chunk()).code.wrapping_add(offset as usize) =
+                ((jump >> 8) & 0xff) as u8;
+            *(*self.current_chunk())
+                .code
+                .wrapping_add(offset as usize + 1) = (jump & 0xff) as u8;
         }
     }
 
@@ -508,17 +511,17 @@ impl Parser {
         unsafe { (*self.current_chunk()).write(byte.into(), self.previous.line) };
     }
 
-    fn emit_loop(&mut self, loop_start: usize) {
+    fn emit_loop(&mut self, loop_start: u32) {
         self.emit_byte(OpCode::Loop);
 
         // +2 to adjust for bytecode for OP_LOOP offset itself
         let offset = unsafe { (*self.current_chunk()).count - loop_start + 2 };
-        if offset > u16::MAX as usize {
+        if offset > u16::MAX as u32 {
             self.error("Loop body too large.");
         }
 
-        self.emit_byte(((offset >> 8) & u8::MAX as usize) as u8);
-        self.emit_byte((offset & u8::MAX as usize) as u8);
+        self.emit_byte(((offset >> 8) & u8::MAX as u32) as u8);
+        self.emit_byte((offset & u8::MAX as u32) as u8);
     }
 
     pub fn end_compiler(&mut self) -> *mut ObjFunction {
@@ -609,7 +612,7 @@ impl Parser {
             loop {
                 unsafe {
                     (*(*CURRENT).function).arity += 1;
-                    if (*(*CURRENT).function).arity > u8::MAX as isize {
+                    if (*(*CURRENT).function).arity > u8::MAX as u32 {
                         self.error_at_current("Can't have more than 255 parameters.");
                     }
                 }

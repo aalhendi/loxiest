@@ -26,8 +26,8 @@ macro_rules! binary_op {
     }};
 }
 
-const FRAMES_MAX: usize = 64;
-const STACK_MAX: usize = FRAMES_MAX * (u8::MAX as usize + 1);
+const FRAMES_MAX: u32 = 64;
+const STACK_MAX: u32 = FRAMES_MAX * (u8::MAX as u32 + 1);
 
 pub enum InterpretResult {
     CompileError,
@@ -41,21 +41,21 @@ pub struct CallFrame {
 }
 
 pub struct VM {
-    pub frames: [CallFrame; FRAMES_MAX],
-    pub frame_count: usize,
+    pub frames: [CallFrame; FRAMES_MAX as usize],
+    pub frame_count: u32,
 
-    pub stack: [Value; STACK_MAX],
+    pub stack: [Value; STACK_MAX as usize],
     pub stack_top: *mut Value,
     pub globals: Table,
     pub strings: Table,
     pub init_string: *mut ObjString,
     pub open_upvalues: *mut ObjUpvalue, // Intrusive linked list
 
-    pub bytes_allocated: usize,
-    pub next_gc: usize,
+    pub bytes_allocated: u32,
+    pub next_gc: u32,
     pub objects: *mut Obj, // Intrusive linked list head
-    pub gray_count: usize,
-    pub gray_capacity: usize,
+    pub gray_count: u32,
+    pub gray_capacity: u32,
     // assume full responsibility for this array, including allocation failure.
     // If we can’t create or grow the gray stack, then we can’t finish the garbage collection.
     // this is bad news for the VM, but fortunately rare since the gray stack tends to be pretty small
@@ -103,7 +103,7 @@ impl VM {
 
     #[inline(always)]
     fn get_frame(&mut self) -> *mut CallFrame {
-        &mut self.frames[self.frame_count - 1]
+        &mut self.frames[self.frame_count as usize - 1]
     }
 
     pub fn run(&mut self) -> Result<(), InterpretResult> {
@@ -167,7 +167,7 @@ impl VM {
                 let offset = unsafe {
                     let chunk_code_ptr = (*(*(*frame).closure).function).chunk.code;
                     let ip_ptr = (*frame).ip;
-                    ip_ptr.offset_from(chunk_code_ptr) as usize
+                    ip_ptr.offset_from(chunk_code_ptr) as u32
                 };
                 unsafe {
                     (*(*(*frame).closure).function)
@@ -467,7 +467,7 @@ impl VM {
         eprintln!("{message}");
 
         for i in (0..=self.frame_count - 1).rev() {
-            let frame = &self.frames[i];
+            let frame = &self.frames[i as usize];
             let function = unsafe { (*frame.closure).function };
             let instruction = unsafe { frame.ip as usize - (*function).chunk.code as usize - 1 };
             let line = unsafe { *((*function).chunk.lines.wrapping_add(instruction)) };
@@ -521,7 +521,7 @@ impl VM {
             return false;
         }
 
-        let frame = &mut self.frames[self.frame_count];
+        let frame = &mut self.frames[self.frame_count as usize];
         self.frame_count += 1;
         frame.closure = closure;
         frame.ip = unsafe { (*(*closure).function).chunk.code };

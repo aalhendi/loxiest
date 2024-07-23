@@ -4,11 +4,11 @@ use std::fmt::Display;
 pub struct Token {
     pub kind: TokenType,
     pub lexeme: &'static str,
-    pub line: usize,
+    pub line: u32,
 }
 
 impl Token {
-    pub fn new(kind: TokenType, lexeme: &'static str, line: usize) -> Token {
+    pub fn new(kind: TokenType, lexeme: &'static str, line: u32) -> Token {
         Token { kind, lexeme, line }
     }
 

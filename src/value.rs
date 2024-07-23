@@ -435,8 +435,8 @@ impl PartialEq for Value {
 }
 
 pub struct ValueArray {
-    pub capacity: isize,
-    pub count: isize,
+    pub capacity: u32,
+    pub count: u32,
     pub values: *mut Value,
 }
 
@@ -463,7 +463,7 @@ impl ValueArray {
             );
         }
 
-        unsafe { *self.values.offset(self.count) = value };
+        unsafe { *self.values.wrapping_add(self.count as usize) = value };
         self.count += 1;
     }
 
