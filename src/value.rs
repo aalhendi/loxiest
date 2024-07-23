@@ -435,8 +435,8 @@ impl PartialEq for Value {
 }
 
 pub struct ValueArray {
-    pub capacity: isize,
-    pub count: isize,
+    pub capacity: usize,
+    pub count: usize,
     pub values: *mut Value,
 }
 
@@ -458,17 +458,17 @@ impl ValueArray {
             self.values = GROW_ARRAY!(
                 Value,
                 self.values,
-                old_capacity as usize,
-                self.capacity as usize
+                old_capacity,
+                self.capacity
             );
         }
 
-        unsafe { *self.values.offset(self.count) = value };
+        unsafe { *self.values.wrapping_add(self.count) = value };
         self.count += 1;
     }
 
     pub fn free(&mut self) {
-        FREE_ARRAY!(Value, self.values, self.capacity as usize);
+        FREE_ARRAY!(Value, self.values, self.capacity);
         *self = Self::default()
     }
 

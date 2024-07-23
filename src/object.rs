@@ -54,7 +54,7 @@ impl Obj {
     }
 
     pub fn copy_string(chars: &[u8], length: usize) -> *mut ObjString {
-        let hash = hash_string(chars.as_ptr(), length as isize);
+        let hash = hash_string(chars.as_ptr(), length);
         unsafe {
             let interned = VM
                 .strings
@@ -81,14 +81,14 @@ pub struct ObjString {
     // Given an ObjString*, you can safely cast it to Obj* and then access the type field from it.
     // Given an Obj*, you can “downcast” it to an ObjString*. MUST ensure Obj* ptr points to obj field an actual ObjString
     pub obj: Obj,
-    pub length: isize,
+    pub length: usize,
     pub chars: *mut u8,
     pub hash: u32,
 }
 
 impl Display for ObjString {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let slice = unsafe { std::slice::from_raw_parts(self.chars, self.length as usize) };
+        let slice = unsafe { std::slice::from_raw_parts(self.chars, self.length) };
         match std::str::from_utf8(slice) {
             Ok(s) => write!(f, "{s}"),
             Err(_) => {
@@ -106,7 +106,7 @@ impl ObjString {
     pub fn allocate_string(chars: *mut u8, length: usize, hash: u32) -> *mut Self {
         let string = ALLOCATE_OBJ!(ObjString, ObjType::String);
         unsafe {
-            (*string).length = length as isize;
+            (*string).length = length;
             (*string).chars = chars;
             (*string).hash = hash;
             VM.push(Value::obj_val(string));
@@ -117,7 +117,7 @@ impl ObjString {
     }
 
     pub fn take_string(chars: *mut u8, length: usize) -> *mut Self {
-        let hash = hash_string(chars as *const u8, length as isize);
+        let hash = hash_string(chars as *const u8, length);
         unsafe {
             let interned = VM.strings.find_string(chars, length, hash);
             if !interned.is_null() {
@@ -133,8 +133,8 @@ impl ObjString {
 #[repr(C)]
 pub struct ObjFunction {
     obj: Obj,
-    pub arity: isize,
-    pub upvalue_count: isize,
+    pub arity: usize,
+    pub upvalue_count: usize,
     pub chunk: Chunk,
     pub name: *mut ObjString,
 }
@@ -196,15 +196,15 @@ pub struct ObjClosure {
     obj: Obj,
     pub function: *mut ObjFunction,
     pub upvalues: *mut *mut ObjUpvalue,
-    pub upvalue_count: isize,
+    pub upvalue_count: usize,
 }
 
 impl ObjClosure {
     pub fn new(function: *mut ObjFunction) -> *mut Self {
         unsafe {
-            let upvalues = ALLOCATE!(*mut ObjUpvalue, (*function).upvalue_count as usize);
+            let upvalues = ALLOCATE!(*mut ObjUpvalue, (*function).upvalue_count);
             for i in 0..(*function).upvalue_count {
-                *upvalues.offset(i) = std::ptr::null_mut();
+                *upvalues.wrapping_add(i) = std::ptr::null_mut();
             }
 
             let closure = ALLOCATE_OBJ!(ObjClosure, ObjType::Closure);
@@ -295,11 +295,11 @@ impl ObjBoundMethod2 {
 }
 
 /// FNV-1a
-fn hash_string(key: *const u8, length: isize) -> u32 {
+fn hash_string(key: *const u8, length: usize) -> u32 {
     let mut hash = 2166136261u32;
     for i in 0..length {
         unsafe {
-            hash ^= (*key.offset(i)) as u32;
+            hash ^= (*key.wrapping_add(i)) as u32;
             hash = hash.overflowing_mul(16777619).0;
         }
     }

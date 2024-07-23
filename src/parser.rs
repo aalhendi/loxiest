@@ -118,7 +118,7 @@ impl Parser {
             if (*CURRENT).scope_depth == 0 {
                 return;
             }
-            (*CURRENT).locals[(*CURRENT).local_count - 1].depth = (*CURRENT).scope_depth;
+            (*CURRENT).locals[(*CURRENT).local_count - 1].depth = Some((*CURRENT).scope_depth);
         }
     }
 
@@ -139,10 +139,13 @@ impl Parser {
         }
 
         let name = &self.previous.clone();
-        let mut i = (unsafe { (*CURRENT).local_count } as isize) - 1;
-        while i >= 0 {
-            let local = unsafe { &(*CURRENT).locals[i as usize] };
-            if local.depth != -1 && local.depth < unsafe { (*CURRENT).scope_depth } {
+        let mut i = (unsafe { (*CURRENT).local_count }) - 1;
+        while i > 0 {
+            let local = unsafe { &(*CURRENT).locals[i] };
+            if local
+                .depth
+                .is_some_and(|d| d < unsafe { (*CURRENT).scope_depth })
+            {
                 break;
             }
 
@@ -165,7 +168,7 @@ impl Parser {
         while i >= 0 {
             let local = unsafe { &(*compiler).locals[i as usize] };
             if self.identifiers_equal(name, &local.name) {
-                if local.depth == -1 {
+                if local.depth.is_none() {
                     self.error("Can't read local variable in its own initializer.");
                 }
                 return i;
@@ -177,7 +180,7 @@ impl Parser {
 
     fn add_upvalue(&mut self, compiler: *mut Compiler, index: u8, is_local: bool) -> isize {
         unsafe {
-            let upvalue_count = (*(*compiler).function).upvalue_count as usize;
+            let upvalue_count = (*(*compiler).function).upvalue_count;
 
             for i in 0..upvalue_count {
                 let upvalue = &(*compiler).upvalues[i];
@@ -230,7 +233,7 @@ impl Parser {
             (*CURRENT).local_count += 1;
 
             local.name = name;
-            local.depth = -1;
+            local.depth = None;
             local.is_captured = false;
         }
     }
@@ -580,7 +583,9 @@ impl Parser {
             (*CURRENT).scope_depth -= 1;
 
             while (*CURRENT).local_count > 0
-                && (*CURRENT).locals[(*CURRENT).local_count - 1].depth > (*CURRENT).scope_depth
+                && (*CURRENT).locals[(*CURRENT).local_count - 1]
+                    .depth
+                    .is_some_and(|d| d > (*CURRENT).scope_depth)
             {
                 if (*CURRENT).locals[(*CURRENT).local_count - 1].is_captured {
                     self.emit_byte(OpCode::CloseUpvalue);
@@ -609,7 +614,7 @@ impl Parser {
             loop {
                 unsafe {
                     (*(*CURRENT).function).arity += 1;
-                    if (*(*CURRENT).function).arity > u8::MAX as isize {
+                    if (*(*CURRENT).function).arity > u8::MAX as usize {
                         self.error_at_current("Can't have more than 255 parameters.");
                     }
                 }
@@ -632,7 +637,7 @@ impl Parser {
         let constant = self.make_constant(val);
         self.emit_bytes(OpCode::Closure.into(), constant);
 
-        for i in 0..unsafe { (*function).upvalue_count as usize } {
+        for i in 0..unsafe { (*function).upvalue_count } {
             self.emit_byte(compiler.upvalues[i].is_local as u8);
             self.emit_byte(compiler.upvalues[i].index);
         }

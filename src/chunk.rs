@@ -185,7 +185,7 @@ impl Chunk {
         self.count += 1;
     }
 
-    pub fn add_constant(&mut self, value: Value) -> isize {
+    pub fn add_constant(&mut self, value: Value) -> usize {
         unsafe { VM.push(value) };
         self.constants.write(value);
         unsafe { VM.pop() };

@@ -27,12 +27,12 @@ pub struct Compiler {
     pub locals: [Local; u8::MAX as usize + 1],
     pub local_count: usize,
     pub upvalues: [Upvalue; u8::MAX as usize + 1],
-    pub scope_depth: isize,
+    pub scope_depth: usize,
 }
 
 pub struct Local {
     pub name: Token,
-    pub depth: isize,
+    pub depth: Option<usize>,
     pub is_captured: bool,
 }
 
@@ -76,7 +76,7 @@ impl Compiler {
             locals: {
                 const DEFAULT: Local = Local {
                     name: Token::undefined(),
-                    depth: 0,
+                    depth: Some(0),
                     is_captured: false,
                 };
                 [DEFAULT; 256]
@@ -115,7 +115,7 @@ impl Compiler {
             // compiler implicitly claims stack slot zero for the VM’s own internal use
             let local = &mut (*CURRENT).locals[(*CURRENT).local_count];
             (*CURRENT).local_count += 1;
-            local.depth = 0;
+            local.depth = Some(0);
             local.is_captured = false;
             local.name = if !is_function {
                 Token::new(TokenType::This, "this", 0)

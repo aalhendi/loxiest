@@ -149,7 +149,7 @@ fn free_object(object: *mut Obj) {
         match (*object).type_ {
             ObjType::String => {
                 let string = object as *mut ObjString;
-                FREE_ARRAY!(u8, (*string).chars, (*string).length as usize);
+                FREE_ARRAY!(u8, (*string).chars, (*string).length);
                 FREE!(ObjString, object);
             }
             ObjType::Function => {
@@ -165,7 +165,7 @@ fn free_object(object: *mut Obj) {
                 FREE_ARRAY!(
                     *mut ObjUpvalue,
                     (*closure).upvalues,
-                    (*closure).upvalue_count as usize
+                    (*closure).upvalue_count
                 );
                 FREE!(ObjClosure, object);
             }
@@ -270,7 +270,7 @@ pub fn mark_value(value: Value) {
 
 fn mark_array(array: &mut ValueArray) {
     for i in 0..array.count {
-        mark_value(unsafe { *array.values.offset(i) });
+        mark_value(unsafe { *array.values.wrapping_add(i) });
     }
 }
 
@@ -292,7 +292,7 @@ fn blacken_object(object: *mut Obj) {
                 let closure = object as *mut ObjClosure;
                 mark_object((*closure).function as *mut Obj);
                 for i in 0..(*closure).upvalue_count {
-                    mark_object((*closure).upvalues.offset(i) as *mut Obj);
+                    mark_object((*closure).upvalues.wrapping_add(i) as *mut Obj);
                 }
             }
             ObjType::Upvalue => mark_value((*(object as *mut ObjUpvalue)).closed),

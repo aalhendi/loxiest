@@ -172,7 +172,7 @@ impl Table {
                     if (*entry).value.is_nil() {
                         return std::ptr::null_mut();
                     }
-                } else if (*(*entry).key).length as usize == length
+                } else if (*(*entry).key).length == length
                     && (*(*entry).key).hash == hash
                     && memory::memcmp((*(*entry).key).chars, chars, length) == 0
                 {

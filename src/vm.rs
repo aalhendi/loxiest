@@ -236,12 +236,12 @@ impl VM {
                         if is_local != 0 {
                             unsafe {
                                 let local = (*frame).slots.wrapping_add(index as usize);
-                                *(*closure).upvalues.wrapping_add(i as usize) =
+                                *(*closure).upvalues.wrapping_add(i) =
                                     self.capture_upvalue(local);
                             }
                         } else {
                             unsafe {
-                                *(*closure).upvalues.wrapping_add(i as usize) =
+                                *(*closure).upvalues.wrapping_add(i) =
                                     *(*(*frame).closure).upvalues.wrapping_add(index as usize);
                             }
                         }
@@ -445,19 +445,19 @@ impl VM {
         let a = self.peek(1).as_string();
 
         let length = unsafe { (*a).length + (*b).length };
-        let chars = ALLOCATE!(u8, length as usize);
+        let chars = ALLOCATE!(u8, length);
         // PERF(aalhendi): ghetto memcpy, not sure about perf
         unsafe {
             for idx in 0..(*a).length {
-                (*chars.offset(idx)) = *(*a).chars.offset(idx);
+                (*chars.wrapping_add(idx)) = *(*a).chars.wrapping_add(idx);
             }
 
             for idx in 0..(*b).length {
-                (*chars.offset((*a).length + idx)) = *(*b).chars.offset(idx);
+                (*chars.wrapping_add((*a).length + idx)) = *(*b).chars.wrapping_add(idx);
             }
         }
 
-        let result = ObjString::take_string(chars, length as usize);
+        let result = ObjString::take_string(chars, length);
         self.pop();
         self.pop();
         self.push(Value::obj_val(result));
