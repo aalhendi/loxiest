@@ -1,23 +1,18 @@
-use std::{
-    cell::RefCell,
-    fmt::Display,
-    hint::unreachable_unchecked,
-    mem,
-    ops::{Deref, Neg},
-    ptr::null_mut,
-    rc::Rc,
-};
+use std::{fmt::Display, mem, ptr::null_mut};
 
 use crate::{
     memory::reallocate,
     object::{
-        Obj, ObjBoundMethod2, ObjClass2, ObjClosure2, ObjFunction, ObjInstance2, ObjNative2,
+        Obj, ObjBoundMethod2, ObjClass2, ObjClosure, ObjFunction, ObjInstance2, ObjNative,
         ObjString, ObjType,
     },
     FREE_ARRAY,
 };
 use crate::{GROW_ARRAY, GROW_CAPACITY};
+#[cfg(feature = "nan-boxing")]
+use std::hint::unreachable_unchecked;
 
+#[cfg(not(feature = "nan-boxing"))]
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum ValueType {
     Bool,
@@ -26,6 +21,7 @@ enum ValueType {
     Obj,
 }
 
+#[cfg(not(feature = "nan-boxing"))]
 #[derive(Clone, Copy)]
 union ValueUnion {
     boolean: bool,
@@ -289,11 +285,11 @@ impl Value {
         }
         unsafe {
             debug_assert!((*self.as_obj()).obj_type() == ObjType::Native);
-            (*std::mem::transmute::<*mut Obj, *mut ObjNative2>(self.as_obj())).function
+            (*std::mem::transmute::<*mut Obj, *mut ObjNative>(self.as_obj())).function
         }
     }
 
-    pub fn as_closure(&self) -> *mut ObjClosure2 {
+    pub fn as_closure(&self) -> *mut ObjClosure {
         #[cfg(not(feature = "nan-boxing"))]
         {
             debug_assert!(self.type_ == ValueType::Obj);
@@ -444,13 +440,17 @@ pub struct ValueArray {
     pub values: *mut Value,
 }
 
-impl ValueArray {
-    pub fn init(&mut self) {
-        self.values = null_mut();
-        self.capacity = 0;
-        self.count = 0;
+impl Default for ValueArray {
+    fn default() -> Self {
+        Self {
+            capacity: 0,
+            count: 0,
+            values: null_mut(),
+        }
     }
+}
 
+impl ValueArray {
     pub fn write(&mut self, value: Value) {
         if self.capacity < self.count + 1 {
             let old_capacity = self.capacity;
@@ -469,7 +469,7 @@ impl ValueArray {
 
     pub fn free(&mut self) {
         FREE_ARRAY!(Value, self.values, self.capacity as usize);
-        self.init();
+        *self = Self::default()
     }
 
     #[cfg(any(feature = "debug-trace-execution", feature = "debug-print-code"))]

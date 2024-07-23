@@ -1,5 +1,4 @@
-use std::mem::MaybeUninit;
-use std::{fmt::Display, mem, ptr::null_mut};
+use std::{fmt::Display, mem};
 
 use crate::memory::reallocate;
 use crate::value::{Value, ValueArray};
@@ -138,7 +137,7 @@ impl From<u8> for OpCode {
             34 => OpCode::Class,
             35 => OpCode::Inherit,
             36 => OpCode::Method,
-            _ => panic!("Unknown opcode {value}"),
+            x => unreachable!("OpCode does not exist: {x}"),
         }
     }
 }
@@ -151,21 +150,24 @@ pub struct Chunk {
     pub constants: ValueArray,
 }
 
-impl Chunk {
-    pub fn init(&mut self) {
-        self.count = 0;
-        self.capacity = 0;
-        self.code = null_mut();
-        self.lines = null_mut();
-        self.constants = unsafe { std::mem::zeroed() };
-        self.constants.init();
+impl Default for Chunk {
+    fn default() -> Self {
+        Self {
+            capacity: 0,
+            count: 0,
+            code: std::ptr::null_mut(),
+            lines: std::ptr::null_mut(),
+            constants: ValueArray::default(),
+        }
     }
+}
 
+impl Chunk {
     pub fn free(&mut self) {
         FREE_ARRAY!(u8, self.code, self.capacity);
         FREE_ARRAY!(usize, self.lines, self.capacity);
         self.constants.free();
-        self.init();
+        *self = Self::default();
     }
 
     pub fn write(&mut self, byte: u8, line: usize) {
@@ -173,12 +175,7 @@ impl Chunk {
             let old_capacity = self.capacity;
             self.capacity = GROW_CAPACITY!(old_capacity);
             self.code = GROW_ARRAY!(u8, self.code, old_capacity, self.capacity);
-            self.lines = GROW_ARRAY!(
-                usize,
-                self.lines,
-                old_capacity,
-                self.capacity
-            );
+            self.lines = GROW_ARRAY!(usize, self.lines, old_capacity, self.capacity);
         }
 
         unsafe {

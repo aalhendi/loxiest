@@ -146,7 +146,7 @@ impl ObjFunction {
             (*function).arity = 0;
             (*function).upvalue_count = 0;
             (*function).name = std::ptr::null_mut();
-            (*function).chunk.init();
+            (*function).chunk = Chunk::default();
         }
         function
     }
@@ -172,17 +172,17 @@ pub fn native_clock2(_arg_count: usize, _args: &[Value]) -> Value {
     }
 }
 
-pub type NativeFn2 = fn(arg_count: usize, args: &[Value]) -> Value;
+pub type NativeFn = fn(arg_count: usize, args: &[Value]) -> Value;
 
 #[repr(C)]
-pub struct ObjNative2 {
+pub struct ObjNative {
     obj: Obj,
-    pub function: NativeFn2,
+    pub function: NativeFn,
 }
 
-impl ObjNative2 {
-    pub fn new(function: NativeFn2) -> *mut Self {
-        let native = ALLOCATE_OBJ!(ObjNative2, ObjType::Native);
+impl ObjNative {
+    pub fn new(function: NativeFn) -> *mut Self {
+        let native = ALLOCATE_OBJ!(ObjNative, ObjType::Native);
         unsafe {
             (*native).function = function;
         }
@@ -192,22 +192,22 @@ impl ObjNative2 {
 }
 
 #[repr(C)]
-pub struct ObjClosure2 {
+pub struct ObjClosure {
     obj: Obj,
     pub function: *mut ObjFunction,
-    pub upvalues: *mut *mut ObjUpvalue2,
+    pub upvalues: *mut *mut ObjUpvalue,
     pub upvalue_count: isize,
 }
 
-impl ObjClosure2 {
+impl ObjClosure {
     pub fn new(function: *mut ObjFunction) -> *mut Self {
         unsafe {
-            let upvalues = ALLOCATE!(*mut ObjUpvalue2, (*function).upvalue_count as usize);
+            let upvalues = ALLOCATE!(*mut ObjUpvalue, (*function).upvalue_count as usize);
             for i in 0..(*function).upvalue_count {
                 *upvalues.offset(i) = std::ptr::null_mut();
             }
 
-            let closure = ALLOCATE_OBJ!(ObjClosure2, ObjType::Closure);
+            let closure = ALLOCATE_OBJ!(ObjClosure, ObjType::Closure);
             (*closure).function = function;
             (*closure).upvalues = upvalues;
             (*closure).upvalue_count = (*function).upvalue_count;
@@ -217,16 +217,16 @@ impl ObjClosure2 {
 }
 
 #[repr(C)]
-pub struct ObjUpvalue2 {
+pub struct ObjUpvalue {
     obj: Obj,
     pub location: *mut Value,
     pub closed: Value,
-    pub next: *mut ObjUpvalue2,
+    pub next: *mut ObjUpvalue,
 }
 
-impl ObjUpvalue2 {
+impl ObjUpvalue {
     pub fn new(slot: *mut Value) -> *mut Self {
-        let upvalue = ALLOCATE_OBJ!(ObjUpvalue2, ObjType::Upvalue);
+        let upvalue = ALLOCATE_OBJ!(ObjUpvalue, ObjType::Upvalue);
         unsafe {
             (*upvalue).closed = Value::nil_val();
             (*upvalue).location = slot;
@@ -279,11 +279,11 @@ impl ObjInstance2 {
 pub struct ObjBoundMethod2 {
     obj: Obj,
     pub reciever: Value,
-    pub method: *mut ObjClosure2,
+    pub method: *mut ObjClosure,
 }
 
 impl ObjBoundMethod2 {
-    pub fn new(receiver: Value, method: *mut ObjClosure2) -> *mut Self {
+    pub fn new(receiver: Value, method: *mut ObjClosure) -> *mut Self {
         let bound = ALLOCATE_OBJ!(ObjBoundMethod2, ObjType::BoundMethod);
         unsafe {
             (*bound).reciever = receiver;

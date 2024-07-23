@@ -1,13 +1,13 @@
-use std::{
-    alloc::{alloc, dealloc, realloc, Layout},
-    ptr::null_mut,
-};
+use std::alloc::{dealloc, realloc, Layout};
+
+#[cfg(target_os = "windows")]
+use std::alloc::alloc;
 
 use crate::{
     compiler::mark_compiler_roots,
     object::{
-        Obj, ObjBoundMethod2, ObjClass2, ObjClosure2, ObjFunction, ObjInstance2, ObjNative2,
-        ObjString, ObjType, ObjUpvalue2,
+        Obj, ObjBoundMethod2, ObjClass2, ObjClosure, ObjFunction, ObjInstance2, ObjNative,
+        ObjString, ObjType, ObjUpvalue,
     },
     value::{Value, ValueArray},
     VM,
@@ -158,19 +158,19 @@ fn free_object(object: *mut Obj) {
                 FREE!(ObjFunction, object);
             }
             ObjType::Native => {
-                FREE!(ObjNative2, object);
+                FREE!(ObjNative, object);
             }
             ObjType::Closure => {
-                let closure = object as *mut ObjClosure2;
+                let closure = object as *mut ObjClosure;
                 FREE_ARRAY!(
-                    *mut ObjUpvalue2,
+                    *mut ObjUpvalue,
                     (*closure).upvalues,
                     (*closure).upvalue_count as usize
                 );
-                FREE!(ObjClosure2, object);
+                FREE!(ObjClosure, object);
             }
             ObjType::Upvalue => {
-                FREE!(ObjUpvalue2, object);
+                FREE!(ObjUpvalue, object);
             }
             ObjType::Class => {
                 let class = object as *mut ObjClass2;
@@ -289,13 +289,13 @@ fn blacken_object(object: *mut Obj) {
                 mark_array(&mut (*function).chunk.constants)
             }
             ObjType::Closure => {
-                let closure = object as *mut ObjClosure2;
+                let closure = object as *mut ObjClosure;
                 mark_object((*closure).function as *mut Obj);
                 for i in 0..(*closure).upvalue_count {
                     mark_object((*closure).upvalues.offset(i) as *mut Obj);
                 }
             }
-            ObjType::Upvalue => mark_value((*(object as *mut ObjUpvalue2)).closed),
+            ObjType::Upvalue => mark_value((*(object as *mut ObjUpvalue)).closed),
             ObjType::Class => {
                 let class = object as *mut ObjClass2;
                 mark_object((*class).name as *mut Obj);

@@ -1,25 +1,19 @@
-// TODO(aalhendi): Remove...
-#![allow(dead_code)]
-#![allow(unused_imports)]
-
 use std::{
-    cell::UnsafeCell,
     env, fs,
     io::{self, BufRead, Write},
-    mem::MaybeUninit,
     ptr::addr_of_mut,
-    sync::Once,
 };
 
-use chunk::{Chunk, OpCode};
-use compiler::{ClassCompiler, Compiler2, Parser};
-use scanner::Scanner;
+use chunk::Chunk;
+use compiler::{ClassCompiler, Compiler};
+use parser::Parser;
 use vm::VM;
 
 mod chunk;
 mod compiler;
 mod memory;
 mod object;
+mod parser;
 mod scanner;
 mod table;
 mod token;
@@ -34,10 +28,10 @@ static mut GLOBAL_SOURCE: String = String::new();
 pub static mut VM: VM = unsafe { std::mem::zeroed() };
 pub static mut COMPILING_CHUNK: *mut Chunk = unsafe { std::mem::zeroed() };
 // TODO(aalhendi): eventually, compiler shouldn't be global
-pub static mut CURRENT: *mut Compiler2 = std::ptr::null_mut();
+pub static mut CURRENT: *mut Compiler = std::ptr::null_mut();
 pub static mut CURRENT_CLASS: *mut ClassCompiler = std::ptr::null_mut();
-pub static mut COMPILER: Compiler2 = Compiler2::new_uninit();
-pub static mut PARSER: compiler::Parser = Parser::new("");
+pub static mut COMPILER: Compiler = Compiler::new_uninit();
+pub static mut PARSER: Parser = Parser::new("");
 
 fn main() {
     unsafe {

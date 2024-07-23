@@ -1,19 +1,12 @@
-use std::{
-    cell::RefCell,
-    collections::{hash_map::Entry, HashMap},
-    hint::unreachable_unchecked,
-    mem::MaybeUninit,
-    ops::Deref,
-    rc::Rc,
-};
+use std::hint::unreachable_unchecked;
 
 use crate::{
-    chunk::{Chunk, OpCode},
-    compiler::{compile, Parser},
+    chunk::OpCode,
+    compiler::compile,
     memory::{free_objects, reallocate},
     object::{
-        native_clock2, NativeFn2, Obj, ObjBoundMethod2, ObjClass2, ObjClosure2, ObjFunction,
-        ObjInstance2, ObjNative2, ObjString, ObjType, ObjUpvalue2,
+        native_clock2, NativeFn, Obj, ObjBoundMethod2, ObjClass2, ObjClosure, ObjInstance2,
+        ObjNative, ObjString, ObjType, ObjUpvalue,
     },
     table::Table,
     value::Value,
@@ -42,7 +35,7 @@ pub enum InterpretResult {
 }
 
 pub struct CallFrame {
-    pub closure: *mut ObjClosure2,
+    pub closure: *mut ObjClosure,
     pub ip: *mut u8,
     pub slots: *mut Value,
 }
@@ -56,7 +49,7 @@ pub struct VM {
     pub globals: Table,
     pub strings: Table,
     pub init_string: *mut ObjString,
-    pub open_upvalues: *mut ObjUpvalue2, // Intrusive linked list
+    pub open_upvalues: *mut ObjUpvalue, // Intrusive linked list
 
     pub bytes_allocated: usize,
     pub next_gc: usize,
@@ -235,7 +228,7 @@ impl VM {
                 }
                 OpCode::Closure => {
                     let function = READ_CONSTANT!().as_function();
-                    let closure = ObjClosure2::new(function);
+                    let closure = ObjClosure::new(function);
                     self.push(Value::obj_val(closure));
                     for i in 0..unsafe { (*closure).upvalue_count } {
                         let is_local = READ_BYTE!();
@@ -439,7 +432,7 @@ impl VM {
         }
 
         self.push(Value::obj_val(function));
-        let closure = ObjClosure2::new(function);
+        let closure = ObjClosure::new(function);
         self.pop();
         self.push(Value::obj_val(closure));
         self.call(closure, 0);
@@ -491,12 +484,12 @@ impl VM {
         self.reset_stack();
     }
 
-    fn define_native(&mut self, name: &str, function: NativeFn2) {
+    fn define_native(&mut self, name: &str, function: NativeFn) {
         self.push(Value::obj_val(Obj::copy_string(
             name.as_bytes(),
             name.as_bytes().len(),
         )));
-        self.push(Value::obj_val(ObjNative2::new(function)));
+        self.push(Value::obj_val(ObjNative::new(function)));
         self.globals.set(self.stack[0].as_string(), self.stack[1]);
         self.pop();
         self.pop();
@@ -516,7 +509,7 @@ impl VM {
         unsafe { *self.stack_top.offset(-1 - distance) }
     }
 
-    fn call(&mut self, closure: *mut ObjClosure2, arg_count: u8) -> bool {
+    fn call(&mut self, closure: *mut ObjClosure, arg_count: u8) -> bool {
         let arity = unsafe { (*(*closure).function).arity } as u8;
         if arg_count != arity {
             self.runtime_error(&format!("Expected {arity} arguments but got {arg_count}."));
@@ -632,7 +625,7 @@ impl VM {
         }
     }
 
-    fn capture_upvalue(&mut self, local: *mut Value) -> *mut ObjUpvalue2 {
+    fn capture_upvalue(&mut self, local: *mut Value) -> *mut ObjUpvalue {
         let mut prev_upvalue = std::ptr::null_mut();
         let mut upvalue = self.open_upvalues;
         while !upvalue.is_null() && unsafe { (*upvalue).location > local } {
@@ -644,7 +637,7 @@ impl VM {
             return upvalue;
         }
 
-        let created_upvalue = ObjUpvalue2::new(local);
+        let created_upvalue = ObjUpvalue::new(local);
         unsafe { (*created_upvalue).next = upvalue };
 
         if prev_upvalue.is_null() {
