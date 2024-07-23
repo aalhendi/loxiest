@@ -268,6 +268,7 @@ impl ObjInstance2 {
         let instance = ALLOCATE_OBJ!(ObjInstance2, ObjType::Instance);
         unsafe {
             (*instance).class = class;
+            (*instance).fields.init();
         }
 
         instance
