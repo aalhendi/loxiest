@@ -5,7 +5,7 @@ use crate::{
     scanner::Scanner,
     token::{Token, TokenType},
     value::Value,
-    CURRENT, CURRENT_CLASS,
+    CURRENT, 
 };
 
 #[derive(Debug, PartialEq, PartialOrd, Clone, Copy)]
@@ -177,6 +177,7 @@ pub struct Parser {
     pub had_error: bool,
     panic_mode: bool,
     scanner: Scanner,
+    current_class: *mut ClassCompiler,
 }
 
 impl Parser {
@@ -187,6 +188,7 @@ impl Parser {
             had_error: false,
             panic_mode: false,
             scanner: Scanner::new(source),
+            current_class: std::ptr::null_mut(),
         }
     }
 
@@ -356,12 +358,10 @@ impl Parser {
         self.define_variable(name_constant);
 
         let mut class_compiler = ClassCompiler {
-            enclosing: unsafe { CURRENT_CLASS },
+            enclosing:  self.current_class ,
             has_superclass: false,
         };
-        unsafe {
-            CURRENT_CLASS = &mut class_compiler;
-        }
+            self.current_class = &mut class_compiler;
 
         if self.is_match(&TokenType::Less) {
             self.consume(TokenType::Identifier, "Expect superclass name.");
@@ -393,7 +393,7 @@ impl Parser {
         }
 
         unsafe {
-            CURRENT_CLASS = (*CURRENT_CLASS).enclosing;
+            self.current_class = (*self.current_class).enclosing;
         }
     }
 
@@ -819,7 +819,7 @@ impl Parser {
     }
 
     fn this(&mut self) {
-        if unsafe { CURRENT_CLASS.is_null() } {
+        if  self.current_class.is_null()  {
             self.error("Can't use 'this' outside of a class.");
             return;
         }
@@ -902,9 +902,9 @@ impl Parser {
 
     fn super_(&mut self) {
         unsafe {
-            if CURRENT_CLASS.is_null() {
+            if self.current_class.is_null() {
                 self.error("Can't use 'super' outside of a class.");
-            } else if !(*CURRENT_CLASS).has_superclass {
+            } else if !(*self.current_class).has_superclass {
                 self.error("Can't use 'super' in a class with no superclass.");
             }
         }

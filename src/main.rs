@@ -6,8 +6,7 @@ use std::{
     ptr::addr_of_mut,
 };
 
-use chunk::Chunk;
-use compiler::{ClassCompiler, Compiler};
+use compiler::Compiler;
 use vm::VM;
 
 mod chunk;
@@ -21,16 +20,13 @@ mod token;
 mod value;
 mod vm;
 
-// Global storage for the current lines
-static mut CURRENT_LINE: String = String::new();
+// Global storage source string. Used to get 'static lifetimes
 static mut GLOBAL_SOURCE: String = String::new();
 // NOTE(aalhendi): Cant use MaybeUninit::uninit().assume_init() because static variables
 // must be initialized with a constant value or an expression that can be evaluated at compile-time.
 pub static mut VM: VM = unsafe { std::mem::zeroed() };
-pub static mut COMPILING_CHUNK: *mut Chunk = unsafe { std::mem::zeroed() };
 // TODO(aalhendi): eventually, compiler shouldn't be global
 pub static mut CURRENT: *mut Compiler = std::ptr::null_mut();
-pub static mut CURRENT_CLASS: *mut ClassCompiler = std::ptr::null_mut();
 
 fn main() {
     unsafe {
@@ -92,7 +88,7 @@ fn repl(vm: *mut VM) {
 
 fn get_static_str(s: String) -> &'static str {
     unsafe {
-        CURRENT_LINE = s;
-        CURRENT_LINE.as_str()
+        GLOBAL_SOURCE = s;
+        GLOBAL_SOURCE.as_str()
     }
 }
