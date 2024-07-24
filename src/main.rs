@@ -8,7 +8,6 @@ use std::{
 
 use chunk::Chunk;
 use compiler::{ClassCompiler, Compiler};
-use parser::Parser;
 use vm::VM;
 
 mod chunk;
@@ -33,7 +32,6 @@ pub static mut COMPILING_CHUNK: *mut Chunk = unsafe { std::mem::zeroed() };
 pub static mut CURRENT: *mut Compiler = std::ptr::null_mut();
 pub static mut CURRENT_CLASS: *mut ClassCompiler = std::ptr::null_mut();
 pub static mut COMPILER: Compiler = Compiler::new_uninit();
-pub static mut PARSER: Parser = Parser::new("");
 
 fn main() {
     unsafe {

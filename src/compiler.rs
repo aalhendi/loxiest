@@ -3,7 +3,7 @@ use crate::{
     object::{Obj, ObjFunction},
     parser::Parser,
     token::{Token, TokenType},
-    COMPILER, CURRENT, PARSER,
+    COMPILER, CURRENT,
 };
 
 #[derive(PartialEq, Clone)]
@@ -43,16 +43,16 @@ pub struct Upvalue {
 
 pub fn compile(source: &'static str) -> *mut ObjFunction {
     unsafe {
-        PARSER = Parser::new(source);
-        COMPILER.init(FunctionType::Script);
+        let mut parser = Parser::new(source);
+        COMPILER.init(FunctionType::Script, "");
 
-        PARSER.advance();
-        while !PARSER.is_match(&TokenType::Eof) {
-            PARSER.declaration();
+        parser.advance();
+        while !parser.is_match(&TokenType::Eof) {
+            parser.declaration();
         }
 
-        let function = PARSER.end_compiler();
-        if PARSER.had_error {
+        let function = parser.end_compiler();
+        if parser.had_error {
             std::ptr::null_mut()
         } else {
             function
@@ -96,7 +96,7 @@ impl Compiler {
         }
     }
 
-    pub fn init(&mut self, function_type: FunctionType) {
+    pub fn init(&mut self, function_type: FunctionType, function_name: &str) {
         let is_script = function_type == FunctionType::Script;
         let is_function = function_type == FunctionType::Function;
         self.enclosing = unsafe { CURRENT };
@@ -108,7 +108,7 @@ impl Compiler {
         unsafe {
             CURRENT = &mut *self;
             if !is_script {
-                let chars = PARSER.previous.lexeme.as_bytes();
+                let chars = function_name.as_bytes();
                 (*(*CURRENT).function).name = Obj::copy_string(chars, chars.len());
             }
 

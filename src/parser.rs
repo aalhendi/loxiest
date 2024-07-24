@@ -714,7 +714,7 @@ impl Parser {
 
     fn function(&mut self, function_type: FunctionType) {
         let mut compiler = Compiler::new_uninit();
-        compiler.init(function_type);
+        compiler.init(function_type, self.previous.lexeme);
         self.begin_scope();
 
         self.consume(TokenType::LeftParen, "Expect '(' after function name.");
