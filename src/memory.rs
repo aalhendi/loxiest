@@ -25,14 +25,14 @@ pub fn reallocate(
             .bytes_allocated
             .wrapping_add(new_size.wrapping_sub(old_size));
     }
-    if new_size > old_size {
-        if cfg!(feature = "debug-stress-gc") {
-            collect_garbage();
-        }
 
-        if unsafe { VM.bytes_allocated > VM.next_gc } {
-            collect_garbage();
-        }
+    if new_size > old_size {
+        #[cfg(feature = "debug-stress-gc")]
+        collect_garbage();
+    }
+
+    if new_size > old_size && unsafe { VM.bytes_allocated > VM.next_gc } {
+        collect_garbage();
     }
 
     if new_size == 0 {
@@ -45,31 +45,22 @@ pub fn reallocate(
         std::ptr::null_mut()
     } else {
         #[cfg(target_os = "windows")]
-        {
-            if pointer.is_null() {
-                unsafe { alloc(Layout::array::<u8>(new_size).unwrap()) as *mut std::ffi::c_void }
-            } else {
-                let old_layout = Layout::array::<u8>(old_size).unwrap();
-                let new_ptr = unsafe { realloc(pointer as *mut u8, old_layout, new_size) };
-                if new_ptr.is_null() {
-                    eprintln!("Failed to reallocate memory");
-                    std::process::exit(1);
-                }
-                new_ptr as *mut std::ffi::c_void
-            }
+        // NOTE(aalhendi): Windows needs null check and explicit alloc
+        // See: https://github.com/rust-lang/rust/blob/8c3a94a1c79c67924558a4adf7fb6d98f5f0f741/library/std/src/sys/pal/windows/alloc.rs#L42-L66
+        if pointer.is_null() {
+            return unsafe {
+                alloc(Layout::array::<u8>(new_size).unwrap()) as *mut std::ffi::c_void
+            };
         }
-        #[cfg(not(target_os = "windows"))]
-        {
-            let old_layout = Layout::array::<u8>(old_size).unwrap();
-            // let new_layout = Layout::array::<u8>(new_size).unwrap();
-            // let new_ptr = unsafe { realloc(pointer as *mut u8, old_layout, new_layout.size()) };
-            let new_ptr = unsafe { realloc(pointer as *mut u8, old_layout, new_size) };
-            if new_ptr.is_null() {
-                eprintln!("Failed to reallocate memory");
-                std::process::exit(1);
-            }
-            new_ptr as *mut std::ffi::c_void
+        let old_layout = Layout::array::<u8>(old_size).unwrap();
+        // let new_layout = Layout::array::<u8>(new_size).unwrap();
+        // let new_ptr = unsafe { realloc(pointer as *mut u8, old_layout, new_layout.size()) };
+        let new_ptr = unsafe { realloc(pointer as *mut u8, old_layout, new_size) };
+        if new_ptr.is_null() {
+            eprintln!("Failed to reallocate memory");
+            std::process::exit(1);
         }
+        new_ptr as *mut std::ffi::c_void
     }
 }
 
@@ -94,16 +85,6 @@ macro_rules! GROW_ARRAY {
             $old_count * mem::size_of::<$type>(),
             $new_count * mem::size_of::<$type>(),
         ) as *mut $type;
-        // TODO(aalhendi): Is the zeroing needed?
-        /*
-        if $new_count > $old_count {
-            let new_slice =
-                std::slice::from_raw_parts_mut(ptr.add($old_count), $new_count - $old_count);
-            for elem in new_slice.iter_mut() {
-                *elem = mem::zeroed();
-            }
-        }
-        */
         ptr
     }};
 }

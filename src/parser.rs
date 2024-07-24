@@ -8,7 +8,7 @@ use crate::{
     CURRENT, CURRENT_CLASS,
 };
 
-#[derive(Debug, PartialEq, PartialOrd)]
+#[derive(Debug, PartialEq, PartialOrd, Clone, Copy)]
 #[repr(u8)]
 enum Precedence {
     None,
@@ -24,21 +24,20 @@ enum Precedence {
     Primary,
 }
 
-impl From<u8> for Precedence {
-    fn from(value: u8) -> Self {
-        match value {
-            0 => Precedence::None,
-            1 => Precedence::Assignment,
-            2 => Precedence::Or,
-            3 => Precedence::And,
-            4 => Precedence::Equality,
-            5 => Precedence::Comparison,
-            6 => Precedence::Term,
-            7 => Precedence::Factor,
-            8 => Precedence::Unary,
-            9 => Precedence::Call,
-            10 => Precedence::Primary,
-            _ => panic!("Unknown precedence value: {}", value),
+impl Precedence {
+    fn next(&self) -> Precedence {
+        match self {
+            Precedence::None => Precedence::Assignment,
+            Precedence::Assignment => Precedence::Or,
+            Precedence::Or => Precedence::And,
+            Precedence::And => Precedence::Equality,
+            Precedence::Equality => Precedence::Comparison,
+            Precedence::Comparison => Precedence::Term,
+            Precedence::Term => Precedence::Factor,
+            Precedence::Factor => Precedence::Unary,
+            Precedence::Unary => Precedence::Call,
+            Precedence::Call => Precedence::Primary,
+            Precedence::Primary => panic!("Precedence::Primary has no next"),
         }
     }
 }
@@ -50,7 +49,7 @@ struct ParseRule {
 }
 
 impl ParseRule {
-    fn new(
+    const fn new(
         prefix: Option<fn(&mut Parser, bool)>,
         infix: Option<fn(&mut Parser, bool)>,
         precedence: Precedence,
@@ -62,6 +61,115 @@ impl ParseRule {
         }
     }
 }
+
+const RULES: [ParseRule; std::mem::variant_count::<TokenType>()] = [
+    /* LeftParen */
+    ParseRule::new(
+        Some(|c, _can_assign| c.grouping()),
+        Some(|c, _can_assign| c.call()),
+        Precedence::Call,
+    ),
+    /* RightParen */ ParseRule::new(None, None, Precedence::None),
+    /* LeftBrace */ ParseRule::new(None, None, Precedence::None),
+    /* RightBrace */ ParseRule::new(None, None, Precedence::None),
+    /* Comma */ ParseRule::new(None, None, Precedence::None),
+    /* Dot */
+    ParseRule::new(
+        None,
+        Some(|c, can_assign| c.dot(can_assign)),
+        Precedence::Call,
+    ),
+    /* Minus */
+    ParseRule::new(
+        Some(|c, _can_assign| c.unary()),
+        Some(|c, can_assign| c.binary(can_assign)),
+        Precedence::Term,
+    ),
+    /* Plus */
+    ParseRule::new(
+        None,
+        Some(|c, can_assign| c.binary(can_assign)),
+        Precedence::Term,
+    ),
+    /* Semicolon */ ParseRule::new(None, None, Precedence::None),
+    /* Slash */
+    ParseRule::new(
+        None,
+        Some(|c, can_assign| c.binary(can_assign)),
+        Precedence::Factor,
+    ),
+    /* Star */
+    ParseRule::new(
+        None,
+        Some(|c, can_assign| c.binary(can_assign)),
+        Precedence::Factor,
+    ),
+    /* Bang */ ParseRule::new(Some(|c, _can_assign| c.unary()), None, Precedence::None),
+    /* BangEqual */
+    ParseRule::new(
+        None,
+        Some(|c, can_assign| c.binary(can_assign)),
+        Precedence::Equality,
+    ),
+    /* Equal */ ParseRule::new(None, None, Precedence::None),
+    /* EqualEqual */
+    ParseRule::new(
+        None,
+        Some(|c, can_assign| c.binary(can_assign)),
+        Precedence::Equality,
+    ),
+    /* Greater */
+    ParseRule::new(
+        None,
+        Some(|c, can_assign| c.binary(can_assign)),
+        Precedence::Comparison,
+    ),
+    /* GreaterEqual */
+    ParseRule::new(
+        None,
+        Some(|c, can_assign| c.binary(can_assign)),
+        Precedence::Comparison,
+    ),
+    /* Less */
+    ParseRule::new(
+        None,
+        Some(|c, can_assign| c.binary(can_assign)),
+        Precedence::Comparison,
+    ),
+    /* LessEqual */
+    ParseRule::new(
+        None,
+        Some(|c, can_assign| c.binary(can_assign)),
+        Precedence::Comparison,
+    ),
+    /* Identifier */
+    ParseRule::new(
+        Some(|c, can_assign| c.variable(can_assign)),
+        None,
+        Precedence::None,
+    ),
+    /* String */ ParseRule::new(Some(|c, _can_assign| c.string()), None, Precedence::None),
+    /* Number */ ParseRule::new(Some(|c, _can_assign| c.number()), None, Precedence::None),
+    /* And */ ParseRule::new(None, Some(|c, _can_assign| c.and()), Precedence::And),
+    /* Class */ ParseRule::new(None, None, Precedence::None),
+    /* Else */ ParseRule::new(None, None, Precedence::None),
+    /* False */ ParseRule::new(Some(|c, _can_assign| c.literal()), None, Precedence::None),
+    /* Fun */ ParseRule::new(None, None, Precedence::None),
+    /* For */ ParseRule::new(None, None, Precedence::None),
+    /* If */ ParseRule::new(None, None, Precedence::None),
+    /* Nil */ ParseRule::new(Some(|c, _can_assign| c.literal()), None, Precedence::None),
+    /* Or */ ParseRule::new(None, Some(|c, _can_assign| c.or()), Precedence::Or),
+    /* Print */ ParseRule::new(None, None, Precedence::None),
+    /* Return */ ParseRule::new(None, None, Precedence::None),
+    /* Super */ ParseRule::new(Some(|c, _can_assign| c.super_()), None, Precedence::None),
+    /* This */ ParseRule::new(Some(|c, _can_assign| c.this()), None, Precedence::None),
+    /* True */ ParseRule::new(Some(|c, _can_assign| c.literal()), None, Precedence::None),
+    /* Var */ ParseRule::new(None, None, Precedence::None),
+    /* While */ ParseRule::new(None, None, Precedence::None),
+    /* Error */ ParseRule::new(None, None, Precedence::None),
+    /* Eof */ ParseRule::new(None, None, Precedence::None),
+    /* Undefined */ ParseRule::new(None, None, Precedence::None),
+];
 
 pub struct Parser {
     pub previous: Token,
@@ -772,9 +880,9 @@ impl Parser {
     // TODO(aalhendi): Create instructions for (!=, <=, and >=). VM would execute faster if we did.
     fn binary(&mut self, can_assign: bool) {
         let operator_kind = &self.previous.kind.clone();
-        let rule = self.get_rule(operator_kind, can_assign);
+        let rule = self.get_rule(*operator_kind, can_assign);
 
-        let next = self.next_precedence(rule.precedence);
+        let next = rule.precedence.next();
         self.parse_precedence(next);
 
         match operator_kind {
@@ -841,21 +949,16 @@ impl Parser {
         arg_count
     }
 
-    fn next_precedence(&self, precedence: Precedence) -> Precedence {
-        // Precedence::Primary has no next.
-        Precedence::from(precedence as u8 + 1)
-    }
-
     fn parse_precedence(&mut self, precedence: Precedence) {
         let can_assign = precedence <= Precedence::Assignment;
         self.advance();
-        match self.get_rule(&self.previous.kind, can_assign).prefix {
+        match self.get_rule(self.previous.kind, can_assign).prefix {
             Some(prefix_rule) => {
                 prefix_rule(self, can_assign);
 
-                while precedence <= self.get_rule(&self.current.kind, can_assign).precedence {
+                while precedence <= self.get_rule(self.current.kind, can_assign).precedence {
                     self.advance();
-                    if let Some(infix_rule) = self.get_rule(&self.previous.kind, can_assign).infix {
+                    if let Some(infix_rule) = self.get_rule(self.previous.kind, can_assign).infix {
                         infix_rule(self, can_assign);
                     }
                 }
@@ -867,105 +970,8 @@ impl Parser {
         }
     }
 
-    fn get_rule(&self, kind: &TokenType, _can_assign: bool) -> ParseRule {
-        // TODO: Make a fixed array called rules. Once cell it or something.
-        // TODO: Kill this function once array is used. Just index the array
-        use TokenType::*;
-        match kind {
-            LeftParen => ParseRule::new(
-                Some(|c, _can_assign| c.grouping()),
-                Some(|c, _can_assign| c.call()),
-                Precedence::Call,
-            ),
-            RightParen => ParseRule::new(None, None, Precedence::None),
-            LeftBrace => ParseRule::new(None, None, Precedence::None),
-            RightBrace => ParseRule::new(None, None, Precedence::None),
-            Comma => ParseRule::new(None, None, Precedence::None),
-            Dot => ParseRule::new(
-                None,
-                Some(|c, can_assign| c.dot(can_assign)),
-                Precedence::Call,
-            ),
-            Minus => ParseRule::new(
-                Some(|c, _can_assign| c.unary()),
-                Some(|c, can_assign| c.binary(can_assign)),
-                Precedence::Term,
-            ),
-            Plus => ParseRule::new(
-                None,
-                Some(|c, can_assign: bool| c.binary(can_assign)),
-                Precedence::Term,
-            ),
-            Semicolon => ParseRule::new(None, None, Precedence::None),
-            Slash => ParseRule::new(
-                None,
-                Some(|c, can_assign| c.binary(can_assign)),
-                Precedence::Factor,
-            ),
-            Star => ParseRule::new(
-                None,
-                Some(|c, can_assign| c.binary(can_assign)),
-                Precedence::Factor,
-            ),
-            Bang => ParseRule::new(Some(|c, _can_assign| c.unary()), None, Precedence::None),
-            BangEqual => ParseRule::new(
-                None,
-                Some(|c, can_assign| c.binary(can_assign)),
-                Precedence::Equality,
-            ),
-            Equal => ParseRule::new(None, None, Precedence::None),
-            EqualEqual => ParseRule::new(
-                None,
-                Some(|c, can_assign| c.binary(can_assign)),
-                Precedence::Equality,
-            ),
-            Greater => ParseRule::new(
-                None,
-                Some(|c, can_assign| c.binary(can_assign)),
-                Precedence::Comparison,
-            ),
-            GreaterEqual => ParseRule::new(
-                None,
-                Some(|c, can_assign| c.binary(can_assign)),
-                Precedence::Comparison,
-            ),
-            Less => ParseRule::new(
-                None,
-                Some(|c, can_assign| c.binary(can_assign)),
-                Precedence::Comparison,
-            ),
-            LessEqual => ParseRule::new(
-                None,
-                Some(|c, can_assign| c.binary(can_assign)),
-                Precedence::Comparison,
-            ),
-            Identifier => ParseRule::new(
-                Some(|c, can_assign| c.variable(can_assign)),
-                None,
-                Precedence::None,
-            ),
-            String => ParseRule::new(Some(|c, _can_assign| c.string()), None, Precedence::None),
-            Number => ParseRule::new(Some(|c, _can_assign| c.number()), None, Precedence::None),
-            And => ParseRule::new(None, Some(|c, _can_assign| c.and()), Precedence::And),
-            Class => ParseRule::new(None, None, Precedence::None),
-            Else => ParseRule::new(None, None, Precedence::None),
-            False => ParseRule::new(Some(|c, _can_assign| c.literal()), None, Precedence::None),
-            Fun => ParseRule::new(None, None, Precedence::None),
-            For => ParseRule::new(None, None, Precedence::None),
-            If => ParseRule::new(None, None, Precedence::None),
-            Nil => ParseRule::new(Some(|c, _can_assign| c.literal()), None, Precedence::None),
-            Or => ParseRule::new(None, Some(|c, _can_assign| c.or()), Precedence::Or),
-            Print => ParseRule::new(None, None, Precedence::None),
-            Return => ParseRule::new(None, None, Precedence::None),
-            Super => ParseRule::new(Some(|c, _can_assign| c.super_()), None, Precedence::None),
-            This => ParseRule::new(Some(|c, _can_assign| c.this()), None, Precedence::None),
-            True => ParseRule::new(Some(|c, _can_assign| c.literal()), None, Precedence::None),
-            Var => ParseRule::new(None, None, Precedence::None),
-            While => ParseRule::new(None, None, Precedence::None),
-            Error => ParseRule::new(None, None, Precedence::None),
-            Eof => ParseRule::new(None, None, Precedence::None),
-            Undefined => unimplemented!(),
-        }
+    fn get_rule(&self, kind: TokenType, _can_assign: bool) -> &'static ParseRule {
+        &RULES[usize::from(kind)]
     }
 
     fn emit_constant(&mut self, value: Value) {

@@ -236,8 +236,7 @@ impl VM {
                         if is_local != 0 {
                             unsafe {
                                 let local = (*frame).slots.wrapping_add(index as usize);
-                                *(*closure).upvalues.wrapping_add(i) =
-                                    self.capture_upvalue(local);
+                                *(*closure).upvalues.wrapping_add(i) = self.capture_upvalue(local);
                             }
                         } else {
                             unsafe {

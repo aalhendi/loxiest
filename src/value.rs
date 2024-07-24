@@ -455,12 +455,7 @@ impl ValueArray {
         if self.capacity < self.count + 1 {
             let old_capacity = self.capacity;
             self.capacity = GROW_CAPACITY!(old_capacity);
-            self.values = GROW_ARRAY!(
-                Value,
-                self.values,
-                old_capacity,
-                self.capacity
-            );
+            self.values = GROW_ARRAY!(Value, self.values, old_capacity, self.capacity);
         }
 
         unsafe { *self.values.wrapping_add(self.count) = value };

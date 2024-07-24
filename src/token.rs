@@ -32,7 +32,7 @@ impl Display for Token {
     }
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 #[repr(C)]
 pub enum TokenType {
     // --- Single-character tokens. ---
@@ -83,4 +83,11 @@ pub enum TokenType {
     Error,
     Eof,
     Undefined,
+}
+
+impl From<TokenType> for usize {
+    fn from(token: TokenType) -> Self {
+        // Safety: TokenType is #[repr(C)]. We know its memory layout and count
+        unsafe { std::mem::transmute::<TokenType, u32>(token) as usize }
+    }
 }

@@ -1,3 +1,5 @@
+#![feature(variant_count)]
+
 use std::{
     env, fs,
     io::{self, BufRead, Write},
