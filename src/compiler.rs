@@ -3,7 +3,7 @@ use crate::{
     object::{Obj, ObjFunction},
     parser::Parser,
     token::{Token, TokenType},
-    COMPILER, CURRENT,
+    CURRENT,
 };
 
 #[derive(PartialEq, Clone)]
@@ -42,21 +42,20 @@ pub struct Upvalue {
 }
 
 pub fn compile(source: &'static str) -> *mut ObjFunction {
-    unsafe {
-        let mut parser = Parser::new(source);
-        COMPILER.init(FunctionType::Script, "");
+    let mut parser = Parser::new(source);
+    let mut compiler = Compiler::new_uninit();
+    compiler.init(FunctionType::Script, "");
 
-        parser.advance();
-        while !parser.is_match(&TokenType::Eof) {
-            parser.declaration();
-        }
+    parser.advance();
+    while !parser.is_match(&TokenType::Eof) {
+        parser.declaration();
+    }
 
-        let function = parser.end_compiler();
-        if parser.had_error {
-            std::ptr::null_mut()
-        } else {
-            function
-        }
+    let function = parser.end_compiler();
+    if parser.had_error {
+        std::ptr::null_mut()
+    } else {
+        function
     }
 }
 

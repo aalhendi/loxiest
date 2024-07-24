@@ -1,5 +1,5 @@
 # TODO
 
-- Rework strings. Support ASCII. test/string/literals.lox
-- Pass test/field/many.lox
-
+- Match clox performance
+    - examples/benchmark/equality - the top half (alloc portion)
+- Try out to global allocator trait

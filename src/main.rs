@@ -31,7 +31,6 @@ pub static mut COMPILING_CHUNK: *mut Chunk = unsafe { std::mem::zeroed() };
 // TODO(aalhendi): eventually, compiler shouldn't be global
 pub static mut CURRENT: *mut Compiler = std::ptr::null_mut();
 pub static mut CURRENT_CLASS: *mut ClassCompiler = std::ptr::null_mut();
-pub static mut COMPILER: Compiler = Compiler::new_uninit();
 
 fn main() {
     unsafe {
