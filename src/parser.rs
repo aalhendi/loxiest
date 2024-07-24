@@ -5,7 +5,7 @@ use crate::{
     scanner::Scanner,
     token::{Token, TokenType},
     value::Value,
-    CURRENT, 
+    CURRENT,
 };
 
 #[derive(Debug, PartialEq, PartialOrd, Clone, Copy)]
@@ -273,10 +273,10 @@ impl Parser {
         a.lexeme == b.lexeme
     }
 
-    fn resolve_local(&mut self, compiler: *mut Compiler, name: &Token) -> isize {
-        let mut i = (unsafe { (*compiler).local_count } as isize) - 1;
+    fn resolve_local(&mut self, compiler: &mut Compiler, name: &Token) -> isize {
+        let mut i = (compiler.local_count as isize) - 1;
         while i >= 0 {
-            let local = unsafe { &(*compiler).locals[i as usize] };
+            let local = &compiler.locals[i as usize];
             if self.identifiers_equal(name, &local.name) {
                 if local.depth.is_none() {
                     self.error("Can't read local variable in its own initializer.");
@@ -288,48 +288,47 @@ impl Parser {
         -1
     }
 
-    fn add_upvalue(&mut self, compiler: *mut Compiler, index: u8, is_local: bool) -> isize {
+    fn add_upvalue(&mut self, compiler: &mut Compiler, index: u8, is_local: bool) -> Option<isize> {
         unsafe {
-            let upvalue_count = (*(*compiler).function).upvalue_count;
+            let upvalue_count = (*compiler.function).upvalue_count;
 
             for i in 0..upvalue_count {
-                let upvalue = &(*compiler).upvalues[i];
+                let upvalue = &compiler.upvalues[i];
                 if upvalue.index == index && upvalue.is_local == is_local {
-                    return i as isize;
+                    return Some(i as isize);
                 }
             }
 
             if upvalue_count == u8::MAX as usize + 1 {
                 self.error("Too many closure variables in function.");
-                return 0;
+                return None;
             }
 
-            (*compiler).upvalues[upvalue_count].is_local = is_local;
-            (*compiler).upvalues[upvalue_count].index = index;
-            (*(*compiler).function).upvalue_count += 1;
-            upvalue_count as isize
+            compiler.upvalues[upvalue_count].is_local = is_local;
+            compiler.upvalues[upvalue_count].index = index;
+            (*compiler.function).upvalue_count += 1;
+            Some(upvalue_count as isize)
         }
     }
 
-    fn resolve_upvalue(&mut self, compiler: *mut Compiler, name: &Token) -> isize {
-        let enclosing = unsafe { (*compiler).enclosing };
-        if enclosing.is_null() {
-            return -1;
-        }
+    fn resolve_upvalue(&mut self, compiler: &mut Compiler, name: &Token) -> Option<isize> {
+        let enclosing = unsafe { compiler.enclosing.as_mut() };
+        enclosing.as_ref()?;
+        let enclosing = enclosing.unwrap();
 
         let local = self.resolve_local(enclosing, name);
         if local != -1 {
             unsafe {
-                (*(*compiler).enclosing).locals[local as usize].is_captured = true;
+                (*compiler.enclosing).locals[local as usize].is_captured = true;
             }
             return self.add_upvalue(compiler, local as u8, true);
         }
 
         let upvalue = self.resolve_upvalue(enclosing, name);
-        if upvalue != -1 {
+        if let Some(upvalue) = upvalue {
             return self.add_upvalue(compiler, upvalue as u8, false);
         }
-        -1
+        None
     }
 
     fn add_local(&mut self, name: Token) {
@@ -358,10 +357,10 @@ impl Parser {
         self.define_variable(name_constant);
 
         let mut class_compiler = ClassCompiler {
-            enclosing:  self.current_class ,
+            enclosing: self.current_class,
             has_superclass: false,
         };
-            self.current_class = &mut class_compiler;
+        self.current_class = &mut class_compiler;
 
         if self.is_match(&TokenType::Less) {
             self.consume(TokenType::Identifier, "Expect superclass name.");
@@ -819,7 +818,7 @@ impl Parser {
     }
 
     fn this(&mut self) {
-        if  self.current_class.is_null()  {
+        if self.current_class.is_null() {
             self.error("Can't use 'this' outside of a class.");
             return;
         }
@@ -827,14 +826,23 @@ impl Parser {
     }
 
     fn named_variable(&mut self, name: &Token, can_assign: bool) {
-        let mut arg = self.resolve_local(unsafe { CURRENT }, name);
+        // SAFETY: Current compiler should be non-null when this is called
+        let current_compiler = unsafe {
+            debug_assert!(!CURRENT.is_null());
+            CURRENT.as_mut_unchecked()
+        };
+        let mut arg = self.resolve_local(current_compiler, name);
 
         // TODO(aalhendi): refactor
         #[allow(clippy::blocks_in_conditions)]
         let (get_op, set_op) = if arg != -1 {
             (OpCode::GetLocal, OpCode::SetLocal)
         } else if {
-            arg = self.resolve_upvalue(unsafe { CURRENT }, name);
+            if let Some(a) = self.resolve_upvalue(current_compiler, name) {
+                arg = a
+            } else {
+                arg = -1
+            }
             arg != -1
         } {
             (OpCode::GetUpvalue, OpCode::SetUpvalue)

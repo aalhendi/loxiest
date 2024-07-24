@@ -1,4 +1,5 @@
 #![feature(variant_count)]
+#![feature(ptr_as_ref_unchecked)]
 
 use std::{
     env, fs,
