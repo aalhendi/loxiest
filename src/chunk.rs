@@ -99,46 +99,9 @@ impl Display for OpCode {
 
 impl From<u8> for OpCode {
     fn from(value: u8) -> Self {
-        match value {
-            0 => OpCode::Constant,
-            1 => OpCode::Nil,
-            2 => OpCode::True,
-            3 => OpCode::False,
-            4 => OpCode::Pop,
-            5 => OpCode::GetLocal,
-            6 => OpCode::SetLocal,
-            7 => OpCode::GetGlobal,
-            8 => OpCode::DefineGlobal,
-            9 => OpCode::SetGlobal,
-            10 => OpCode::GetUpvalue,
-            11 => OpCode::SetUpvalue,
-            12 => OpCode::GetProperty,
-            13 => OpCode::SetProperty,
-            14 => OpCode::GetSuper,
-            15 => OpCode::Equal,
-            16 => OpCode::Greater,
-            17 => OpCode::Less,
-            18 => OpCode::Add,
-            19 => OpCode::Subtract,
-            20 => OpCode::Multiply,
-            21 => OpCode::Divide,
-            22 => OpCode::Not,
-            23 => OpCode::Negate,
-            24 => OpCode::Print,
-            25 => OpCode::Jump,
-            26 => OpCode::JumpIfFalse,
-            27 => OpCode::Loop,
-            28 => OpCode::Call,
-            29 => OpCode::Invoke,
-            30 => OpCode::SuperInvoke,
-            31 => OpCode::Closure,
-            32 => OpCode::CloseUpvalue,
-            33 => OpCode::Return,
-            34 => OpCode::Class,
-            35 => OpCode::Inherit,
-            36 => OpCode::Method,
-            x => unreachable!("OpCode does not exist: {x}"),
-        }
+        // NOTE(aalhendi): used to be a `match` statement but it would compile down to a lookup table and that was too slow.
+        // downside of transmute is unknown opcodes and UB. Besides that, its essentially u8 to u8
+        unsafe { std::mem::transmute::<u8, OpCode>(value) }
     }
 }
 

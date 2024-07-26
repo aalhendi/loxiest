@@ -364,6 +364,7 @@ fn sweep() {
     }
 }
 
+// PERF(aalhendi): is this good enough? Not sure if theres a built-in version
 /// Returns an integer less than, equal to, or greater than zero if `s1` is found,
 /// respectively, to be less than, to match, or be greater than `s2`.
 pub unsafe fn memcmp(s1: *const u8, s2: *const u8, n: usize) -> i32 {

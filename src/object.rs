@@ -66,10 +66,7 @@ impl Obj {
 
         let heap_chars = ALLOCATE!(u8, length);
         unsafe {
-            // PERF(aalhendi): ghetto memcpy, not sure about perf
-            for (idx, c) in chars.iter().enumerate() {
-                (*heap_chars.wrapping_add(idx)) = *c;
-            }
+            std::ptr::copy_nonoverlapping(chars.as_ptr(), heap_chars, length);
         }
 
         ObjString::allocate_string(heap_chars, length, hash)

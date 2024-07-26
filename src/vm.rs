@@ -445,15 +445,9 @@ impl VM {
 
         let length = unsafe { (*a).length + (*b).length };
         let chars = ALLOCATE!(u8, length);
-        // PERF(aalhendi): ghetto memcpy, not sure about perf
         unsafe {
-            for idx in 0..(*a).length {
-                (*chars.wrapping_add(idx)) = *(*a).chars.wrapping_add(idx);
-            }
-
-            for idx in 0..(*b).length {
-                (*chars.wrapping_add((*a).length + idx)) = *(*b).chars.wrapping_add(idx);
-            }
+            std::ptr::copy_nonoverlapping((*a).chars, chars, (*a).length);
+            std::ptr::copy_nonoverlapping((*b).chars, chars.add((*a).length), (*b).length);
         }
 
         let result = ObjString::take_string(chars, length);
