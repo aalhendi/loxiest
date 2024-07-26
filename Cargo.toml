@@ -16,4 +16,4 @@ nan-boxing = []
 default = ["nan-boxing"]
 
 [profile.release]
-debug = true
+lto = true
