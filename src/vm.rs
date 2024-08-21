@@ -202,7 +202,7 @@ impl VM {
                     }
                 }
                 OpCode::Call => {
-                    let arg_count = READ_BYTE!();
+                    let arg_count = READ_BYTE!() as usize;
                     let value = self.peek(arg_count as isize);
                     if !self.call_value(value, arg_count) {
                         return Err(InterpretResult::RuntimeError);
@@ -211,7 +211,7 @@ impl VM {
                 }
                 OpCode::Invoke => {
                     let method = READ_STRING!();
-                    let arg_count = READ_BYTE!();
+                    let arg_count = READ_BYTE!() as usize;
                     if !self.invoke(method, arg_count) {
                         return Err(InterpretResult::RuntimeError);
                     }
@@ -219,7 +219,7 @@ impl VM {
                 }
                 OpCode::SuperInvoke => {
                     let method = READ_STRING!();
-                    let arg_count = READ_BYTE!();
+                    let arg_count = READ_BYTE!() as usize;
                     let superclass = self.pop().as_class();
                     if !self.invoke_from_class(superclass, method, arg_count) {
                         return Err(InterpretResult::RuntimeError);
@@ -395,7 +395,7 @@ impl VM {
                 OpCode::Divide => binary_op!(self, Value::number_val, /),
                 OpCode::Not => {
                     let v = Value::bool_val(self.pop().is_falsey());
-                    self.push(v)
+                    self.push(v);
                 }
                 OpCode::Class => {
                     let v = Value::obj_val(ObjClass2::new(READ_STRING!()));
@@ -459,7 +459,7 @@ impl VM {
     fn runtime_error(&mut self, message: &str) {
         eprintln!("{message}");
 
-        for i in (0..=self.frame_count - 1).rev() {
+        for i in (0..self.frame_count).rev() {
             let frame = &self.frames[i];
             let function = unsafe { (*frame.closure).function };
             let instruction = unsafe { frame.ip as usize - (*function).chunk.code as usize - 1 };
@@ -471,7 +471,7 @@ impl VM {
                     format!("{}()", (*(*function).name))
                 }
             };
-            eprintln!("[line {line}] in {name}")
+            eprintln!("[line {line}] in {name}");
         }
 
         self.reset_stack();
@@ -502,8 +502,8 @@ impl VM {
         unsafe { *self.stack_top.offset(-1 - distance) }
     }
 
-    fn call(&mut self, closure: *mut ObjClosure, arg_count: u8) -> bool {
-        let arity = unsafe { (*(*closure).function).arity } as u8;
+    fn call(&mut self, closure: *mut ObjClosure, arg_count: usize) -> bool {
+        let arity = unsafe { (*(*closure).function).arity };
         if arg_count != arity {
             self.runtime_error(&format!("Expected {arity} arguments but got {arg_count}."));
             return false;
@@ -522,7 +522,7 @@ impl VM {
         true
     }
 
-    fn call_value(&mut self, callee: Value, arg_count: u8) -> bool {
+    fn call_value(&mut self, callee: Value, arg_count: usize) -> bool {
         if callee.is_obj() {
             match callee.obj_type() {
                 ObjType::Closure => return self.call(callee.as_closure(), arg_count),
@@ -531,17 +531,17 @@ impl VM {
                 ObjType::Native => {
                     let native = callee.as_native();
                     let args = unsafe {
-                        std::slice::from_raw_parts_mut(self.stack_top, arg_count as usize)
+                        std::slice::from_raw_parts_mut(self.stack_top, arg_count)
                     };
-                    let result = native(arg_count as usize, args);
-                    self.stack_top = self.stack_top.wrapping_sub(arg_count as usize + 1);
+                    let result = native(arg_count, args);
+                    self.stack_top = self.stack_top.wrapping_sub(arg_count + 1);
                     self.push(result);
                     return true;
                 }
                 ObjType::Class => {
                     let class = callee.as_class();
                     unsafe {
-                        *self.stack_top.wrapping_sub(arg_count as usize + 1) =
+                        *self.stack_top.wrapping_sub(arg_count + 1) =
                             Value::obj_val(ObjInstance2::new(class));
                         if let Some(initializer) = (*class).methods.get(self.init_string) {
                             return self.call(initializer.as_closure(), arg_count);
@@ -575,7 +575,7 @@ impl VM {
         &mut self,
         class: *mut ObjClass2,
         name: *mut ObjString,
-        arg_count: u8,
+        arg_count: usize,
     ) -> bool {
         unsafe {
             if let Some(method) = (*class).methods.get(name) {
@@ -587,7 +587,7 @@ impl VM {
         }
     }
 
-    fn invoke(&mut self, name: *mut ObjString, arg_count: u8) -> bool {
+    fn invoke(&mut self, name: *mut ObjString, arg_count: usize) -> bool {
         let receiver = self.peek(arg_count as isize);
         if !receiver.is_instance() {
             self.runtime_error("Only instances have methods.");
@@ -596,7 +596,7 @@ impl VM {
         let instance = receiver.as_instance();
         unsafe {
             if let Some(value) = (*instance).fields.get(name) {
-                *self.stack_top.wrapping_sub(arg_count as usize + 1) = value;
+                *self.stack_top.wrapping_sub(arg_count + 1) = value;
                 self.call_value(value, arg_count)
             } else {
                 self.invoke_from_class((*instance).class, name, arg_count)

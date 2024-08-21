@@ -42,10 +42,10 @@ pub struct Value {
 pub struct Value(pub u64);
 
 #[cfg(feature = "nan-boxing")]
-const SIGN_BIT: u64 = 0b1000000000000000000000000000000000000000000000000000000000000000;
+const SIGN_BIT: u64 = 0b1000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000;
 #[cfg(feature = "nan-boxing")]
 // 0x7ffc000000000000 - all exponent bits, QNAN bit and one more to avoid Intel magic value
-const QNAN: u64 = 0b0111111111111100000000000000000000000000000000000000000000000000;
+const QNAN: u64 = 0b0111_1111_1111_1100_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000;
 #[cfg(feature = "nan-boxing")]
 const TAG_NIL: u64 = 0b01;
 #[cfg(feature = "nan-boxing")]
@@ -464,7 +464,7 @@ impl ValueArray {
 
     pub fn free(&mut self) {
         FREE_ARRAY!(Value, self.values, self.capacity);
-        *self = Self::default()
+        *self = Self::default();
     }
 
     #[cfg(any(feature = "debug-trace-execution", feature = "debug-print-code"))]

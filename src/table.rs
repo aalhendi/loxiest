@@ -49,11 +49,10 @@ impl Table {
                         } else {
                             tombstone
                         };
-                    } else {
-                        // We found a tombstone.
-                        if tombstone.is_null() {
-                            tombstone = entry;
-                        }
+                    }
+                    // We found a tombstone.
+                    if tombstone.is_null() {
+                        tombstone = entry;
                     }
                 } else if (*entry).key == key {
                     // We found the key.

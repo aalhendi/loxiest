@@ -99,8 +99,7 @@ impl Display for OpCode {
 
 impl From<u8> for OpCode {
     fn from(value: u8) -> Self {
-        // NOTE(aalhendi): used to be a `match` statement but it would compile down to a lookup table and that was too slow.
-        // downside of transmute is unknown opcodes and UB. Besides that, its essentially u8 to u8
+        debug_assert!(value as usize <= std::mem::variant_count::<OpCode>());
         unsafe { std::mem::transmute::<u8, OpCode>(value) }
     }
 }
@@ -160,7 +159,7 @@ impl Chunk {
         println!("== {name} ==");
 
         let mut offset = 0;
-        while offset < self.count as usize {
+        while offset < self.count {
             offset = self.disassemble_instruction(offset);
         }
     }
@@ -278,14 +277,14 @@ impl Chunk {
     fn jump_instruction(&self, name: OpCode, is_neg: bool, offset: usize) -> usize {
         let name = name.to_string();
         let jump = unsafe {
-            (((*self.code.wrapping_add(offset + 1)) as u16) << 8)
-                | ((*self.code.wrapping_add(offset + 2)) as u16)
+            (((*self.code.wrapping_add(offset + 1)) as usize) << 8)
+                | ((*self.code.wrapping_add(offset + 2)) as usize)
         };
 
         // NOTE: This could underflow and that would be a bug in the impl so it shouldn't.
         let dst = match is_neg {
-            true => offset + 3 - jump as usize,
-            false => offset + 3 + jump as usize,
+            true => offset + 3 - jump,
+            false => offset + 3 + jump,
         };
         println!("{name:-16} {offset:4} -> {dst}",);
         offset + 3
@@ -294,7 +293,7 @@ impl Chunk {
     #[cfg(any(feature = "debug-trace-execution", feature = "debug-print-code"))]
     fn invoke_instruction(&self, name: OpCode, offset: usize) -> usize {
         let constant_idx = unsafe { *self.code.wrapping_add(offset + 1) } as usize;
-        let arg_count = unsafe { *self.code.wrapping_add(offset + 2) } as usize;
+        let arg_count = unsafe { *self.code.wrapping_add(offset + 2) };
         let name = name.to_string();
 
         print!("{name:-16} ({arg_count} args) {constant_idx:4} '");

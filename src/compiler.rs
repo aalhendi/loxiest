@@ -116,10 +116,10 @@ impl Compiler {
             (*CURRENT).local_count += 1;
             local.depth = Some(0);
             local.is_captured = false;
-            local.name = if !is_function {
-                Token::new(TokenType::This, "this", 0)
-            } else {
+            local.name = if is_function {
                 Token::undefined()
+            } else {
+                Token::new(TokenType::This, "this", 0)
             };
         }
     }

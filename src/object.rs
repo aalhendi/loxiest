@@ -86,15 +86,14 @@ pub struct ObjString {
 impl Display for ObjString {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let slice = unsafe { std::slice::from_raw_parts(self.chars, self.length) };
-        match std::str::from_utf8(slice) {
-            Ok(s) => write!(f, "{s}"),
-            Err(_) => {
-                // Not valid UTF-8, fall back to printing raw bytes
-                for &byte in slice {
-                    write!(f, "{:02x}", byte)?;
-                }
-                Ok(())
+        if let Ok(s) = std::str::from_utf8(slice) {
+            write!(f, "{s}")
+        } else {
+            // Not valid UTF-8, fall back to printing raw bytes
+            for &byte in slice {
+                write!(f, "{byte:02x}")?;
             }
+            Ok(())
         }
     }
 }
@@ -293,11 +292,11 @@ impl ObjBoundMethod2 {
 
 /// FNV-1a
 fn hash_string(key: *const u8, length: usize) -> u32 {
-    let mut hash = 2166136261u32;
+    let mut hash = 2_166_136_261_u32;
     for i in 0..length {
         unsafe {
             hash ^= (*key.wrapping_add(i)) as u32;
-            hash = hash.overflowing_mul(16777619).0;
+            hash = hash.overflowing_mul(16_777_619).0;
         }
     }
     hash

@@ -267,7 +267,7 @@ fn blacken_object(object: *mut Obj) {
             ObjType::Function => {
                 let function = object as *mut ObjFunction;
                 mark_object((*function).name as *mut Obj);
-                mark_array(&mut (*function).chunk.constants)
+                mark_array(&mut (*function).chunk.constants);
             }
             ObjType::Closure => {
                 let closure = object as *mut ObjClosure;
@@ -353,10 +353,10 @@ fn sweep() {
             } else {
                 let unreached = object;
                 object = (*object).next;
-                if !previous.is_null() {
-                    (*previous).next = object;
-                } else {
+                if previous.is_null() {
                     VM.objects = object;
+                } else {
+                    (*previous).next = object;
                 }
                 free_object(unreached);
             }
