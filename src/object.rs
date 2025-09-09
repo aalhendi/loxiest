@@ -5,7 +5,7 @@ use crate::chunk::Chunk;
 use crate::memory::reallocate;
 use crate::table::Table;
 use crate::value::Value;
-use crate::{ALLOCATE, FREE_ARRAY, VM};
+use crate::{vm, ALLOCATE, FREE_ARRAY};
 
 macro_rules! ALLOCATE_OBJ {
     ($type_:ty, $object_type:expr) => {
@@ -18,8 +18,8 @@ fn allocate_object(size: usize, type_: ObjType) -> *mut Obj {
     unsafe {
         (*object).type_ = type_;
         (*object).is_marked = false;
-        (*object).next = VM.objects;
-        VM.objects = object;
+        (*object).next = vm().objects;
+        vm().objects = object;
         #[cfg(feature = "debug-log-gc")]
         {
             println!("{object:p} allocate {size} for {type_:?}");
@@ -55,13 +55,11 @@ impl Obj {
 
     pub fn copy_string(chars: &[u8], length: usize) -> *mut ObjString {
         let hash = hash_string(chars.as_ptr(), length);
-        unsafe {
-            let interned = VM
-                .strings
-                .find_string(chars.as_ptr() as *mut u8, length, hash);
-            if !interned.is_null() {
-                return interned;
-            }
+        let interned = vm()
+            .strings
+            .find_string(chars.as_ptr() as *mut u8, length, hash);
+        if !interned.is_null() {
+            return interned;
         }
 
         let heap_chars = ALLOCATE!(u8, length);
@@ -105,21 +103,19 @@ impl ObjString {
             (*string).length = length;
             (*string).chars = chars;
             (*string).hash = hash;
-            VM.push(Value::obj_val(string));
-            VM.strings.set(string, Value::nil_val());
-            VM.pop();
+            vm().push(Value::obj_val(string));
+            vm().strings.set(string, Value::nil_val());
+            vm().pop();
         }
         string
     }
 
     pub fn take_string(chars: *mut u8, length: usize) -> *mut Self {
         let hash = hash_string(chars as *const u8, length);
-        unsafe {
-            let interned = VM.strings.find_string(chars, length, hash);
-            if !interned.is_null() {
-                FREE_ARRAY!(u8, chars, length);
-                return interned;
-            }
+        let interned = vm().strings.find_string(chars, length, hash);
+        if !interned.is_null() {
+            FREE_ARRAY!(u8, chars, length);
+            return interned;
         }
 
         ObjString::allocate_string(chars, length, hash)

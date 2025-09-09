@@ -1,12 +1,12 @@
 use std::{fmt::Display, mem, ptr::null_mut};
 
 use crate::{
+    FREE_ARRAY,
     memory::reallocate,
     object::{
         Obj, ObjBoundMethod2, ObjClass2, ObjClosure, ObjFunction, ObjInstance2, ObjNative,
         ObjString, ObjType,
     },
-    FREE_ARRAY,
 };
 use crate::{GROW_ARRAY, GROW_CAPACITY};
 #[cfg(feature = "nan-boxing")]
@@ -42,7 +42,8 @@ pub struct Value {
 pub struct Value(pub u64);
 
 #[cfg(feature = "nan-boxing")]
-const SIGN_BIT: u64 = 0b1000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000;
+const SIGN_BIT: u64 =
+    0b1000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000;
 #[cfg(feature = "nan-boxing")]
 // 0x7ffc000000000000 - all exponent bits, QNAN bit and one more to avoid Intel magic value
 const QNAN: u64 = 0b0111_1111_1111_1100_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000;
@@ -152,11 +153,7 @@ impl Value {
     pub const fn bool_val(value: bool) -> Self {
         #[cfg(feature = "nan-boxing")]
         {
-            if value {
-                TRUE_VAL
-            } else {
-                FALSE_VAL
-            }
+            if value { TRUE_VAL } else { FALSE_VAL }
         }
         #[cfg(not(feature = "nan-boxing"))]
         {
@@ -183,9 +180,8 @@ impl Value {
 
     pub const fn number_val(value: f64) -> Self {
         #[cfg(feature = "nan-boxing")]
-        // Self(value.to_bits()) // TODO(aalhendi): unstable as const fn
-        unsafe {
-            Self(std::mem::transmute::<f64, u64>(value))
+        {
+            Self(value.to_bits())
         }
         #[cfg(not(feature = "nan-boxing"))]
         Self {
@@ -194,15 +190,10 @@ impl Value {
         }
     }
 
-    pub const fn obj_val<T>(object: *mut T) -> Self {
+    pub fn obj_val<T>(object: *mut T) -> Self {
         #[cfg(feature = "nan-boxing")]
         {
-            // SAFETY: transmuting a ptr to u64, relies on ptr being 64-bit and is unsafe.
-            #[allow(clippy::transmutes_expressible_as_ptr_casts)]
-            // NOTE(aalhendi): Workaround to avoid error "pointers cannot be cast to integers during const eval"
-            unsafe {
-                Value(SIGN_BIT | QNAN | std::mem::transmute::<*mut T, u64>(object))
-            }
+            Value(SIGN_BIT | QNAN | object as u64)
         }
 
         #[cfg(not(feature = "nan-boxing"))]

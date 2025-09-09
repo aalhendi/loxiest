@@ -2,7 +2,7 @@ use std::{fmt::Display, mem};
 
 use crate::memory::reallocate;
 use crate::value::{Value, ValueArray};
-use crate::{FREE_ARRAY, GROW_ARRAY, GROW_CAPACITY, VM};
+use crate::{vm, FREE_ARRAY, GROW_ARRAY, GROW_CAPACITY};
 
 #[derive(Debug)]
 #[repr(u8)]
@@ -148,9 +148,9 @@ impl Chunk {
     }
 
     pub fn add_constant(&mut self, value: Value) -> usize {
-        unsafe { VM.push(value) };
+        vm().push(value);
         self.constants.write(value);
-        unsafe { VM.pop() };
+        vm().pop();
         self.constants.count - 1
     }
 

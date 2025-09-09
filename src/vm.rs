@@ -480,7 +480,7 @@ impl VM {
     fn define_native(&mut self, name: &str, function: NativeFn) {
         self.push(Value::obj_val(Obj::copy_string(
             name.as_bytes(),
-            name.as_bytes().len(),
+            name.len(),
         )));
         self.push(Value::obj_val(ObjNative::new(function)));
         self.globals.set(self.stack[0].as_string(), self.stack[1]);
@@ -530,9 +530,7 @@ impl VM {
                 ObjType::Function => unsafe { unreachable_unchecked() },
                 ObjType::Native => {
                     let native = callee.as_native();
-                    let args = unsafe {
-                        std::slice::from_raw_parts_mut(self.stack_top, arg_count)
-                    };
+                    let args = unsafe { std::slice::from_raw_parts_mut(self.stack_top, arg_count) };
                     let result = native(arg_count, args);
                     self.stack_top = self.stack_top.wrapping_sub(arg_count + 1);
                     self.push(result);

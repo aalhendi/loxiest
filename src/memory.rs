@@ -1,16 +1,17 @@
-use std::alloc::{dealloc, realloc, Layout};
+use std::alloc::{Layout, dealloc, realloc};
 
 #[cfg(target_os = "windows")]
 use std::alloc::alloc;
 
 use crate::{
+    VM,
     compiler::mark_compiler_roots,
     object::{
         Obj, ObjBoundMethod2, ObjClass2, ObjClosure, ObjFunction, ObjInstance2, ObjNative,
         ObjString, ObjType, ObjUpvalue,
     },
     value::{Value, ValueArray},
-    VM,
+    vm,
 };
 
 const GC_HEAP_GROWTH_FACTOR: usize = 2;
@@ -68,11 +69,7 @@ pub fn reallocate(
 #[macro_export]
 macro_rules! GROW_CAPACITY {
     ($capacity:expr) => {
-        if $capacity < 8 {
-            8
-        } else {
-            $capacity * 2
-        }
+        if $capacity < 8 { 8 } else { $capacity * 2 }
     };
 }
 
@@ -213,30 +210,30 @@ pub fn collect_garbage() {
 
 fn mark_roots() {
     unsafe {
-        let mut slot = VM.stack.as_mut_ptr();
-        while slot < VM.stack_top {
+        let mut slot = vm().stack.as_mut_ptr();
+        while slot < vm().stack_top {
             mark_value(*slot);
 
             slot = slot.offset(1);
         }
 
         let mut i = 0;
-        while i < VM.frame_count {
-            mark_object(VM.frames[i].closure as *mut Obj);
+        while i < vm().frame_count {
+            mark_object(vm().frames[i].closure as *mut Obj);
 
             i += 1;
         }
 
-        let mut upvalue = VM.open_upvalues;
+        let mut upvalue = vm().open_upvalues;
         while !upvalue.is_null() {
             mark_object(upvalue as *mut Obj);
 
             upvalue = (*upvalue).next;
         }
 
-        VM.globals.mark();
+        vm().globals.mark();
         mark_compiler_roots();
-        mark_object(VM.init_string as *mut Obj);
+        mark_object(vm().init_string as *mut Obj);
     }
 }
 
@@ -311,23 +308,23 @@ pub fn mark_object(object: *mut Obj) {
         }
         (*object).is_marked = true;
 
-        if VM.gray_capacity < VM.gray_count + 1 {
-            VM.gray_capacity = GROW_CAPACITY!(VM.gray_capacity);
+        if vm().gray_capacity < vm().gray_count + 1 {
+            vm().gray_capacity = GROW_CAPACITY!(vm().gray_capacity);
             // TODO(aalhendi): verify
             // calls system realloc and not our wrapper.
             // memory for the gray stack itself is not managed by the garbage collector
-            VM.gray_stack = realloc(
-                VM.gray_stack as *mut u8,
-                Layout::array::<*mut Obj>(VM.gray_capacity).unwrap(),
-                std::mem::size_of::<*mut Obj>() * VM.gray_capacity,
+            vm().gray_stack = realloc(
+                vm().gray_stack as *mut u8,
+                Layout::array::<*mut Obj>(vm().gray_capacity).unwrap(),
+                std::mem::size_of::<*mut Obj>() * vm().gray_capacity,
             ) as *mut *mut Obj;
 
-            if VM.gray_stack.is_null() {
+            if vm().gray_stack.is_null() {
                 std::process::exit(1);
             }
         }
-        *VM.gray_stack.wrapping_add(VM.gray_count) = object;
-        VM.gray_count += 1;
+        *vm().gray_stack.wrapping_add(vm().gray_count) = object;
+        vm().gray_count += 1;
     }
 }
 
@@ -369,8 +366,8 @@ fn sweep() {
 /// respectively, to be less than, to match, or be greater than `s2`.
 pub unsafe fn memcmp(s1: *const u8, s2: *const u8, n: usize) -> i32 {
     for i in 0..n {
-        let a = *s1.add(i);
-        let b = *s2.add(i);
+        let a = unsafe { *s1.add(i) };
+        let b = unsafe { *s2.add(i) };
         if a != b {
             return a as i32 - b as i32;
         }
