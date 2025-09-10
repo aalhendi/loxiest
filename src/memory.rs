@@ -127,7 +127,7 @@ fn free_object(object: *mut Obj) {
         match (*object).type_ {
             ObjType::String => {
                 let string = object as *mut ObjString;
-                FREE_ARRAY!(u8, (*string).chars, (*string).length);
+                FREE_ARRAY!(u8, (*string).chars, (*string).length as usize);
                 FREE!(ObjString, object);
             }
             ObjType::Function => {
@@ -143,7 +143,7 @@ fn free_object(object: *mut Obj) {
                 FREE_ARRAY!(
                     *mut ObjUpvalue,
                     (*closure).upvalues,
-                    (*closure).upvalue_count
+                    (*closure).upvalue_count as usize
                 );
                 FREE!(ObjClosure, object);
             }
@@ -176,7 +176,7 @@ pub fn free_objects() {
             object = next;
         }
 
-        let layout = Layout::array::<*mut Obj>(VM.gray_capacity).unwrap();
+        let layout = Layout::array::<*mut Obj>(VM.gray_capacity as usize).unwrap();
         dealloc(VM.gray_stack as *mut u8, layout);
     }
 }
@@ -219,7 +219,7 @@ fn mark_roots() {
 
         let mut i = 0;
         while i < vm().frame_count {
-            mark_object(vm().frames[i].closure as *mut Obj);
+            mark_object(vm().frames.get_unchecked(i as usize).closure as *mut Obj);
 
             i += 1;
         }
@@ -248,7 +248,7 @@ pub fn mark_value(value: Value) {
 
 fn mark_array(array: &mut ValueArray) {
     for i in 0..array.count {
-        mark_value(unsafe { *array.values.wrapping_add(i) });
+        mark_value(unsafe { *array.values.wrapping_offset(i as isize) });
     }
 }
 
@@ -270,7 +270,7 @@ fn blacken_object(object: *mut Obj) {
                 let closure = object as *mut ObjClosure;
                 mark_object((*closure).function as *mut Obj);
                 for i in 0..(*closure).upvalue_count {
-                    mark_object((*closure).upvalues.wrapping_add(i) as *mut Obj);
+                    mark_object((*closure).upvalues.wrapping_offset(i as isize) as *mut Obj);
                 }
             }
             ObjType::Upvalue => mark_value((*(object as *mut ObjUpvalue)).closed),
@@ -315,15 +315,15 @@ pub fn mark_object(object: *mut Obj) {
             // memory for the gray stack itself is not managed by the garbage collector
             vm().gray_stack = realloc(
                 vm().gray_stack as *mut u8,
-                Layout::array::<*mut Obj>(vm().gray_capacity).unwrap(),
-                std::mem::size_of::<*mut Obj>() * vm().gray_capacity,
+                Layout::array::<*mut Obj>(vm().gray_capacity as usize).unwrap(),
+                std::mem::size_of::<*mut Obj>() * vm().gray_capacity as usize,
             ) as *mut *mut Obj;
 
             if vm().gray_stack.is_null() {
                 std::process::exit(1);
             }
         }
-        *vm().gray_stack.wrapping_add(vm().gray_count) = object;
+        *vm().gray_stack.wrapping_offset(vm().gray_count as isize) = object;
         vm().gray_count += 1;
     }
 }
@@ -332,7 +332,7 @@ fn trace_references() {
     unsafe {
         while VM.gray_count > 0 {
             VM.gray_count -= 1;
-            let object = *VM.gray_stack.wrapping_add(VM.gray_count);
+            let object = *VM.gray_stack.wrapping_offset(VM.gray_count as isize);
             blacken_object(object);
         }
     }

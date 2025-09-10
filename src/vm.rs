@@ -1,16 +1,16 @@
 use std::hint::unreachable_unchecked;
 
 use crate::{
+    ALLOCATE,
     chunk::OpCode,
     compiler::compile,
     memory::{free_objects, reallocate},
     object::{
-        native_clock2, NativeFn, Obj, ObjBoundMethod2, ObjClass2, ObjClosure, ObjInstance2,
-        ObjNative, ObjString, ObjType, ObjUpvalue,
+        NativeFn, Obj, ObjBoundMethod2, ObjClass2, ObjClosure, ObjInstance2, ObjNative, ObjString,
+        ObjType, ObjUpvalue, native_clock2,
     },
     table::Table,
     value::Value,
-    ALLOCATE,
 };
 
 macro_rules! binary_op {
@@ -34,15 +34,17 @@ pub enum InterpretResult {
     RuntimeError,
 }
 
+#[repr(C)]
 pub struct CallFrame {
     pub closure: *mut ObjClosure,
     pub ip: *mut u8,
     pub slots: *mut Value,
 }
 
+#[repr(C)]
 pub struct VM {
     pub frames: [CallFrame; FRAMES_MAX],
-    pub frame_count: usize,
+    pub frame_count: i32,
 
     pub stack: [Value; STACK_MAX],
     pub stack_top: *mut Value,
@@ -54,8 +56,8 @@ pub struct VM {
     pub bytes_allocated: usize,
     pub next_gc: usize,
     pub objects: *mut Obj, // Intrusive linked list head
-    pub gray_count: usize,
-    pub gray_capacity: usize,
+    pub gray_count: i32,
+    pub gray_capacity: i32,
     // assume full responsibility for this array, including allocation failure.
     // If we can’t create or grow the gray stack, then we can’t finish the garbage collection.
     // this is bad news for the VM, but fortunately rare since the gray stack tends to be pretty small
@@ -103,7 +105,7 @@ impl VM {
 
     #[inline(always)]
     fn get_frame(&mut self) -> *mut CallFrame {
-        &mut self.frames[self.frame_count - 1]
+        unsafe { self.frames.get_unchecked_mut(self.frame_count as usize - 1) }
     }
 
     pub fn run(&mut self) -> Result<(), InterpretResult> {
@@ -148,9 +150,7 @@ impl VM {
         }
 
         macro_rules! READ_STRING {
-            () => {{
-                READ_CONSTANT!().as_string()
-            }};
+            () => {{ READ_CONSTANT!().as_string() }};
         }
 
         loop {
@@ -167,7 +167,7 @@ impl VM {
                 let offset = unsafe {
                     let chunk_code_ptr = (*(*(*frame).closure).function).chunk.code;
                     let ip_ptr = (*frame).ip;
-                    ip_ptr.offset_from(chunk_code_ptr) as usize
+                    ip_ptr.offset_from(chunk_code_ptr) as i32
                 };
                 unsafe {
                     (*(*(*frame).closure).function)
@@ -184,34 +184,34 @@ impl VM {
                 OpCode::Jump => {
                     let offset = READ_SHORT!();
                     unsafe {
-                        (*frame).ip = (*frame).ip.wrapping_add(offset as usize);
+                        (*frame).ip = (*frame).ip.wrapping_offset(offset as isize);
                     }
                 }
                 OpCode::JumpIfFalse => {
                     let offset = READ_SHORT!();
                     if self.peek(0).is_falsey() {
                         unsafe {
-                            (*frame).ip = (*frame).ip.wrapping_add(offset as usize);
+                            (*frame).ip = (*frame).ip.wrapping_offset(offset as isize);
                         }
                     }
                 }
                 OpCode::Loop => {
                     let offset = READ_SHORT!();
                     unsafe {
-                        (*frame).ip = (*frame).ip.wrapping_sub(offset as usize);
+                        (*frame).ip = (*frame).ip.wrapping_offset(-(offset as isize));
                     }
                 }
                 OpCode::Call => {
-                    let arg_count = READ_BYTE!() as usize;
-                    let value = self.peek(arg_count as isize);
-                    if !self.call_value(value, arg_count) {
+                    let arg_count = READ_BYTE!();
+                    let value = self.peek(arg_count as i32);
+                    if !self.call_value(value, arg_count as i32) {
                         return Err(InterpretResult::RuntimeError);
                     }
                     frame = self.get_frame();
                 }
                 OpCode::Invoke => {
                     let method = READ_STRING!();
-                    let arg_count = READ_BYTE!() as usize;
+                    let arg_count = READ_BYTE!() as i32;
                     if !self.invoke(method, arg_count) {
                         return Err(InterpretResult::RuntimeError);
                     }
@@ -219,7 +219,7 @@ impl VM {
                 }
                 OpCode::SuperInvoke => {
                     let method = READ_STRING!();
-                    let arg_count = READ_BYTE!() as usize;
+                    let arg_count = READ_BYTE!() as i32;
                     let superclass = self.pop().as_class();
                     if !self.invoke_from_class(superclass, method, arg_count) {
                         return Err(InterpretResult::RuntimeError);
@@ -235,13 +235,14 @@ impl VM {
                         let index = READ_BYTE!();
                         if is_local != 0 {
                             unsafe {
-                                let local = (*frame).slots.wrapping_add(index as usize);
-                                *(*closure).upvalues.wrapping_add(i) = self.capture_upvalue(local);
+                                let local = (*frame).slots.wrapping_offset(index as isize);
+                                *(*closure).upvalues.wrapping_add(i as usize) =
+                                    self.capture_upvalue(local);
                             }
                         } else {
                             unsafe {
-                                *(*closure).upvalues.wrapping_add(i) =
-                                    *(*(*frame).closure).upvalues.wrapping_add(index as usize);
+                                *(*closure).upvalues.wrapping_add(i as usize) =
+                                    *(*(*frame).closure).upvalues.wrapping_offset(index as isize);
                             }
                         }
                     }
@@ -283,13 +284,13 @@ impl VM {
                 }
                 OpCode::GetLocal => {
                     let slot = READ_BYTE!();
-                    let val = unsafe { *(*frame).slots.wrapping_add(slot as usize) };
+                    let val = unsafe { *(*frame).slots.wrapping_offset(slot as isize) };
                     self.push(val);
                 }
                 OpCode::SetLocal => {
                     let slot = READ_BYTE!();
                     unsafe {
-                        *(*frame).slots.wrapping_add(slot as usize) = self.peek(0);
+                        *(*frame).slots.wrapping_offset(slot as isize) = self.peek(0);
                     }
                 }
                 OpCode::GetGlobal => {
@@ -322,16 +323,17 @@ impl VM {
                     }
                 }
                 OpCode::GetUpvalue => {
-                    let slot = READ_BYTE!() as usize;
-                    let v =
-                        unsafe { *(*(*(*(*frame).closure).upvalues.wrapping_add(slot))).location };
+                    let slot = READ_BYTE!();
+                    let v = unsafe {
+                        *(*(*(*(*frame).closure).upvalues.wrapping_offset(slot as isize))).location
+                    };
                     self.push(v);
                 }
                 OpCode::SetUpvalue => {
-                    let slot = READ_BYTE!() as usize;
+                    let slot = READ_BYTE!();
                     unsafe {
-                        *(*(*(*(*frame).closure).upvalues.wrapping_add(slot))).location =
-                            self.peek(0);
+                        *(*(*(*(*frame).closure).upvalues.wrapping_offset(slot as isize)))
+                            .location = self.peek(0);
                     }
                 }
                 OpCode::SetProperty => {
@@ -444,10 +446,14 @@ impl VM {
         let a = self.peek(1).as_string();
 
         let length = unsafe { (*a).length + (*b).length };
-        let chars = ALLOCATE!(u8, length);
+        let chars = ALLOCATE!(u8, length as usize);
         unsafe {
-            std::ptr::copy_nonoverlapping((*a).chars, chars, (*a).length);
-            std::ptr::copy_nonoverlapping((*b).chars, chars.add((*a).length), (*b).length);
+            std::ptr::copy_nonoverlapping((*a).chars, chars, (*a).length as usize);
+            std::ptr::copy_nonoverlapping(
+                (*b).chars,
+                chars.add((*a).length as usize),
+                (*b).length as usize,
+            );
         }
 
         let result = ObjString::take_string(chars, length);
@@ -460,7 +466,7 @@ impl VM {
         eprintln!("{message}");
 
         for i in (0..self.frame_count).rev() {
-            let frame = &self.frames[i];
+            let frame = unsafe { self.frames.get_unchecked(i as usize) };
             let function = unsafe { (*frame.closure).function };
             let instruction = unsafe { frame.ip as usize - (*function).chunk.code as usize - 1 };
             let line = unsafe { *((*function).chunk.lines.wrapping_add(instruction)) };
@@ -480,7 +486,7 @@ impl VM {
     fn define_native(&mut self, name: &str, function: NativeFn) {
         self.push(Value::obj_val(Obj::copy_string(
             name.as_bytes(),
-            name.len(),
+            name.len() as i32,
         )));
         self.push(Value::obj_val(ObjNative::new(function)));
         self.globals.set(self.stack[0].as_string(), self.stack[1]);
@@ -498,23 +504,23 @@ impl VM {
         unsafe { *self.stack_top }
     }
 
-    fn peek(&self, distance: isize) -> Value {
-        unsafe { *self.stack_top.offset(-1 - distance) }
+    fn peek(&self, distance: i32) -> Value {
+        unsafe { *self.stack_top.offset(-1 - distance as isize) }
     }
 
-    fn call(&mut self, closure: *mut ObjClosure, arg_count: usize) -> bool {
+    fn call(&mut self, closure: *mut ObjClosure, arg_count: i32) -> bool {
         let arity = unsafe { (*(*closure).function).arity };
         if arg_count != arity {
             self.runtime_error(&format!("Expected {arity} arguments but got {arg_count}."));
             return false;
         }
 
-        if self.frame_count == FRAMES_MAX {
+        if self.frame_count == FRAMES_MAX as i32 {
             self.runtime_error("Stack overflow.");
             return false;
         }
 
-        let frame = &mut self.frames[self.frame_count];
+        let frame = unsafe { self.frames.get_unchecked_mut(self.frame_count as usize) };
         self.frame_count += 1;
         frame.closure = closure;
         frame.ip = unsafe { (*(*closure).function).chunk.code };
@@ -522,7 +528,7 @@ impl VM {
         true
     }
 
-    fn call_value(&mut self, callee: Value, arg_count: usize) -> bool {
+    fn call_value(&mut self, callee: Value, arg_count: i32) -> bool {
         if callee.is_obj() {
             match callee.obj_type() {
                 ObjType::Closure => return self.call(callee.as_closure(), arg_count),
@@ -530,16 +536,18 @@ impl VM {
                 ObjType::Function => unsafe { unreachable_unchecked() },
                 ObjType::Native => {
                     let native = callee.as_native();
-                    let args = unsafe { std::slice::from_raw_parts_mut(self.stack_top, arg_count) };
+                    let args = unsafe {
+                        std::slice::from_raw_parts_mut(self.stack_top, arg_count as usize)
+                    };
                     let result = native(arg_count, args);
-                    self.stack_top = self.stack_top.wrapping_sub(arg_count + 1);
+                    self.stack_top = self.stack_top.wrapping_sub(arg_count as usize + 1);
                     self.push(result);
                     return true;
                 }
                 ObjType::Class => {
                     let class = callee.as_class();
                     unsafe {
-                        *self.stack_top.wrapping_sub(arg_count + 1) =
+                        *self.stack_top.wrapping_sub(arg_count as usize + 1) =
                             Value::obj_val(ObjInstance2::new(class));
                         if let Some(initializer) = (*class).methods.get(self.init_string) {
                             return self.call(initializer.as_closure(), arg_count);
@@ -573,7 +581,7 @@ impl VM {
         &mut self,
         class: *mut ObjClass2,
         name: *mut ObjString,
-        arg_count: usize,
+        arg_count: i32,
     ) -> bool {
         unsafe {
             if let Some(method) = (*class).methods.get(name) {
@@ -585,8 +593,8 @@ impl VM {
         }
     }
 
-    fn invoke(&mut self, name: *mut ObjString, arg_count: usize) -> bool {
-        let receiver = self.peek(arg_count as isize);
+    fn invoke(&mut self, name: *mut ObjString, arg_count: i32) -> bool {
+        let receiver = self.peek(arg_count);
         if !receiver.is_instance() {
             self.runtime_error("Only instances have methods.");
             return false;
@@ -594,7 +602,7 @@ impl VM {
         let instance = receiver.as_instance();
         unsafe {
             if let Some(value) = (*instance).fields.get(name) {
-                *self.stack_top.wrapping_sub(arg_count + 1) = value;
+                *self.stack_top.wrapping_sub(arg_count as usize + 1) = value;
                 self.call_value(value, arg_count)
             } else {
                 self.invoke_from_class((*instance).class, name, arg_count)

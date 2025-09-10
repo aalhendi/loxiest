@@ -108,7 +108,7 @@ impl Compiler {
             CURRENT = &mut *self;
             if !is_script {
                 let chars = function_name.as_bytes();
-                (*(*CURRENT).function).name = Obj::copy_string(chars, chars.len());
+                (*(*CURRENT).function).name = Obj::copy_string(chars, chars.len() as i32);
             }
 
             // compiler implicitly claims stack slot zero for the VM’s own internal use

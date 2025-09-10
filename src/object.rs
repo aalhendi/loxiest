@@ -30,6 +30,7 @@ fn allocate_object(size: usize, type_: ObjType) -> *mut Obj {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[repr(C)]
 pub enum ObjType {
     String,
     Function,
@@ -53,7 +54,7 @@ impl Obj {
         self.type_
     }
 
-    pub fn copy_string(chars: &[u8], length: usize) -> *mut ObjString {
+    pub fn copy_string(chars: &[u8], length: i32) -> *mut ObjString {
         let hash = hash_string(chars.as_ptr(), length);
         let interned = vm()
             .strings
@@ -62,9 +63,9 @@ impl Obj {
             return interned;
         }
 
-        let heap_chars = ALLOCATE!(u8, length);
+        let heap_chars = ALLOCATE!(u8, length as usize);
         unsafe {
-            std::ptr::copy_nonoverlapping(chars.as_ptr(), heap_chars, length);
+            std::ptr::copy_nonoverlapping(chars.as_ptr(), heap_chars, length as usize);
         }
 
         ObjString::allocate_string(heap_chars, length, hash)
@@ -76,14 +77,14 @@ pub struct ObjString {
     // Given an ObjString*, you can safely cast it to Obj* and then access the type field from it.
     // Given an Obj*, you can “downcast” it to an ObjString*. MUST ensure Obj* ptr points to obj field an actual ObjString
     pub obj: Obj,
-    pub length: usize,
+    pub length: i32,
     pub chars: *mut u8,
     pub hash: u32,
 }
 
 impl Display for ObjString {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let slice = unsafe { std::slice::from_raw_parts(self.chars, self.length) };
+        let slice = unsafe { std::slice::from_raw_parts(self.chars, self.length as usize) };
         if let Ok(s) = std::str::from_utf8(slice) {
             write!(f, "{s}")
         } else {
@@ -97,7 +98,7 @@ impl Display for ObjString {
 }
 
 impl ObjString {
-    pub fn allocate_string(chars: *mut u8, length: usize, hash: u32) -> *mut Self {
+    pub fn allocate_string(chars: *mut u8, length: i32, hash: u32) -> *mut Self {
         let string = ALLOCATE_OBJ!(ObjString, ObjType::String);
         unsafe {
             (*string).length = length;
@@ -110,11 +111,11 @@ impl ObjString {
         string
     }
 
-    pub fn take_string(chars: *mut u8, length: usize) -> *mut Self {
+    pub fn take_string(chars: *mut u8, length: i32) -> *mut Self {
         let hash = hash_string(chars as *const u8, length);
         let interned = vm().strings.find_string(chars, length, hash);
         if !interned.is_null() {
-            FREE_ARRAY!(u8, chars, length);
+            FREE_ARRAY!(u8, chars, length as usize);
             return interned;
         }
 
@@ -125,8 +126,8 @@ impl ObjString {
 #[repr(C)]
 pub struct ObjFunction {
     obj: Obj,
-    pub arity: usize,
-    pub upvalue_count: usize,
+    pub arity: i32,
+    pub upvalue_count: i32,
     pub chunk: Chunk,
     pub name: *mut ObjString,
 }
@@ -157,14 +158,14 @@ impl Display for ObjFunction {
     }
 }
 
-pub fn native_clock2(_arg_count: usize, _args: &[Value]) -> Value {
+pub fn native_clock2(_arg_count: i32, _args: &[Value]) -> Value {
     match SystemTime::now().duration_since(SystemTime::UNIX_EPOCH) {
         Ok(n) => Value::number_val(n.as_secs_f64()),
         Err(e) => panic!("{e}"),
     }
 }
 
-pub type NativeFn = fn(arg_count: usize, args: &[Value]) -> Value;
+pub type NativeFn = fn(arg_count: i32, args: &[Value]) -> Value;
 
 #[repr(C)]
 pub struct ObjNative {
@@ -188,15 +189,15 @@ pub struct ObjClosure {
     obj: Obj,
     pub function: *mut ObjFunction,
     pub upvalues: *mut *mut ObjUpvalue,
-    pub upvalue_count: usize,
+    pub upvalue_count: i32,
 }
 
 impl ObjClosure {
     pub fn new(function: *mut ObjFunction) -> *mut Self {
         unsafe {
-            let upvalues = ALLOCATE!(*mut ObjUpvalue, (*function).upvalue_count);
+            let upvalues = ALLOCATE!(*mut ObjUpvalue, (*function).upvalue_count as usize);
             for i in 0..(*function).upvalue_count {
-                *upvalues.wrapping_add(i) = std::ptr::null_mut();
+                *upvalues.wrapping_offset(i as isize) = std::ptr::null_mut();
             }
 
             let closure = ALLOCATE_OBJ!(ObjClosure, ObjType::Closure);
@@ -287,11 +288,11 @@ impl ObjBoundMethod2 {
 }
 
 /// FNV-1a
-fn hash_string(key: *const u8, length: usize) -> u32 {
+fn hash_string(key: *const u8, length: i32) -> u32 {
     let mut hash = 2_166_136_261_u32;
     for i in 0..length {
         unsafe {
-            hash ^= (*key.wrapping_add(i)) as u32;
+            hash ^= (*key.wrapping_offset(i as isize)) as u32;
             hash = hash.overflowing_mul(16_777_619).0;
         }
     }
