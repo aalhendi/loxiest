@@ -4,7 +4,7 @@ pub struct Scanner {
     source: &'static str,
     start: usize,
     current: usize,
-    line: usize,
+    line: i32,
 }
 
 impl Scanner {

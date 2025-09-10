@@ -151,7 +151,7 @@ impl Parser {
 
     fn identifier_constant(&mut self, name: &Token) -> u8 {
         let chars = name.lexeme.as_bytes();
-        self.make_constant(Value::obj_val(Obj::copy_string(chars, chars.len())))
+        self.make_constant(Value::obj_val(Obj::copy_string(chars, chars.len() as i32)))
     }
 
     fn define_variable(&mut self, global: u8) {
@@ -233,19 +233,19 @@ impl Parser {
             let upvalue_count = (*compiler.function).upvalue_count;
 
             for i in 0..upvalue_count {
-                let upvalue = &compiler.upvalues[i];
+                let upvalue = &compiler.upvalues.get_unchecked(i as usize);
                 if upvalue.index == index && upvalue.is_local == is_local {
                     return Some(i as isize);
                 }
             }
 
-            if upvalue_count == u8::MAX as usize + 1 {
+            if upvalue_count == u8::MAX as i32 + 1 {
                 self.error("Too many closure variables in function.");
                 return None;
             }
 
-            compiler.upvalues[upvalue_count].is_local = is_local;
-            compiler.upvalues[upvalue_count].index = index;
+            compiler.upvalues[upvalue_count as usize].is_local = is_local;
+            compiler.upvalues[upvalue_count as usize].index = index;
             (*compiler.function).upvalue_count += 1;
             Some(upvalue_count as isize)
         }
@@ -507,7 +507,7 @@ impl Parser {
         self.patch_jump(else_jump);
     }
 
-    fn emit_jump<T: Into<u8>>(&mut self, instruction: T) -> usize {
+    fn emit_jump<T: Into<u8>>(&mut self, instruction: T) -> i32 {
         self.emit_byte(instruction);
         self.emit_byte(0xff);
         self.emit_byte(0xff);
@@ -515,17 +515,17 @@ impl Parser {
         unsafe { (*self.current_chunk()).count - 2 }
     }
 
-    fn patch_jump(&mut self, offset: usize) {
+    fn patch_jump(&mut self, offset: i32) {
         // -2 to adjust for the bytecode for the jump offset itself.
         let jump = unsafe { (*self.current_chunk()).count } - offset - 2;
 
-        if jump > u16::MAX as usize {
+        if jump > u16::MAX as i32 {
             self.error("Too much code to jump over.");
         }
 
         unsafe {
-            *(*self.current_chunk()).code.add(offset) = ((jump >> 8) & 0xff) as u8;
-            *(*self.current_chunk()).code.add(offset + 1) = (jump & 0xff) as u8;
+            *(*self.current_chunk()).code.offset(offset as isize) = ((jump >> 8) & 0xff) as u8;
+            *(*self.current_chunk()).code.offset(offset as isize + 1) = (jump & 0xff) as u8;
         }
     }
 
@@ -558,17 +558,17 @@ impl Parser {
         unsafe { (*self.current_chunk()).write(byte.into(), self.previous.line) };
     }
 
-    fn emit_loop(&mut self, loop_start: usize) {
+    fn emit_loop(&mut self, loop_start: i32) {
         self.emit_byte(OpCode::Loop);
 
         // +2 to adjust for bytecode for OP_LOOP offset itself
         let offset = unsafe { (*self.current_chunk()).count - loop_start + 2 };
-        if offset > u16::MAX as usize {
+        if offset > u16::MAX as i32 {
             self.error("Loop body too large.");
         }
 
-        self.emit_byte(((offset >> 8) & u8::MAX as usize) as u8);
-        self.emit_byte((offset & u8::MAX as usize) as u8);
+        self.emit_byte(((offset >> 8) & u8::MAX as i32) as u8);
+        self.emit_byte((offset & u8::MAX as i32) as u8);
     }
 
     pub fn end_compiler(&mut self) -> *mut ObjFunction {
@@ -661,7 +661,7 @@ impl Parser {
             loop {
                 unsafe {
                     (*(*CURRENT).function).arity += 1;
-                    if (*(*CURRENT).function).arity > u8::MAX as usize {
+                    if (*(*CURRENT).function).arity > u8::MAX as i32 {
                         self.error_at_current("Can't have more than 255 parameters.");
                     }
                 }
@@ -685,8 +685,8 @@ impl Parser {
         self.emit_bytes(OpCode::Closure.into(), constant);
 
         for i in 0..unsafe { (*function).upvalue_count } {
-            self.emit_byte(compiler.upvalues[i].is_local as u8);
-            self.emit_byte(compiler.upvalues[i].index);
+            self.emit_byte(compiler.upvalues[i as usize].is_local as u8);
+            self.emit_byte(compiler.upvalues[i as usize].index);
         }
     }
 
@@ -748,7 +748,7 @@ impl Parser {
         let chars = self.previous.lexeme.as_bytes();
         self.emit_constant(Value::obj_val(Obj::copy_string(
             &chars[1..chars.len() - 1],
-            self.previous.lexeme.len() - 2,
+            self.previous.lexeme.len() as i32 - 2,
         )));
     }
 
@@ -925,7 +925,7 @@ impl Parser {
 
     fn make_constant(&mut self, value: Value) -> u8 {
         let constant = unsafe { (*self.current_chunk()).add_constant(value) };
-        if constant > u8::MAX.into() {
+        if constant > u8::MAX as i32 {
             self.error("Too many constants in one chunk.");
             return 0;
         }

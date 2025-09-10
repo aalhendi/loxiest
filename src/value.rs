@@ -269,7 +269,7 @@ impl Value {
         }
     }
 
-    pub fn as_native(&self) -> fn(arg_count: usize, args: &[Value]) -> Value {
+    pub fn as_native(&self) -> fn(arg_count: i32, args: &[Value]) -> Value {
         #[cfg(not(feature = "nan-boxing"))]
         {
             debug_assert!(self.type_ == ValueType::Obj);
@@ -425,9 +425,10 @@ impl PartialEq for Value {
     }
 }
 
+#[repr(C)]
 pub struct ValueArray {
-    pub capacity: usize,
-    pub count: usize,
+    pub capacity: i32,
+    pub count: i32,
     pub values: *mut Value,
 }
 
@@ -446,15 +447,15 @@ impl ValueArray {
         if self.capacity < self.count + 1 {
             let old_capacity = self.capacity;
             self.capacity = GROW_CAPACITY!(old_capacity);
-            self.values = GROW_ARRAY!(Value, self.values, old_capacity, self.capacity);
+            self.values = GROW_ARRAY!(Value, self.values, old_capacity as usize, self.capacity as usize);
         }
 
-        unsafe { *self.values.wrapping_add(self.count) = value };
+        unsafe { *self.values.wrapping_offset(self.count as isize) = value };
         self.count += 1;
     }
 
     pub fn free(&mut self) {
-        FREE_ARRAY!(Value, self.values, self.capacity);
+        FREE_ARRAY!(Value, self.values, self.capacity as usize);
         *self = Self::default();
     }
 
