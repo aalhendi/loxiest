@@ -2,7 +2,7 @@ use std::{fmt::Display, mem};
 
 use crate::memory::reallocate;
 use crate::value::{Value, ValueArray};
-use crate::{vm, FREE_ARRAY, GROW_ARRAY, GROW_CAPACITY};
+use crate::{FREE_ARRAY, GROW_ARRAY, GROW_CAPACITY, vm};
 
 #[derive(Debug)]
 #[repr(u8)]
@@ -138,7 +138,12 @@ impl Chunk {
             let old_capacity = self.capacity;
             self.capacity = GROW_CAPACITY!(old_capacity);
             self.code = GROW_ARRAY!(u8, self.code, old_capacity as usize, self.capacity as usize);
-            self.lines = GROW_ARRAY!(i32, self.lines, old_capacity as usize, self.capacity as usize);
+            self.lines = GROW_ARRAY!(
+                i32,
+                self.lines,
+                old_capacity as usize,
+                self.capacity as usize
+            );
         }
 
         unsafe {

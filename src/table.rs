@@ -1,8 +1,8 @@
 use crate::{
+    ALLOCATE, FREE_ARRAY, GROW_CAPACITY,
     memory::{self, mark_object, mark_value, reallocate},
     object::{Obj, ObjString},
     value::Value,
-    ALLOCATE, FREE_ARRAY, GROW_CAPACITY,
 };
 
 const TABLE_MAX_LOAD: f32 = 0.75;

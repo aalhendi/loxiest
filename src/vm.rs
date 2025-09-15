@@ -13,19 +13,6 @@ use crate::{
     value::Value,
 };
 
-macro_rules! binary_op {
-    ($vm:expr, $value_type:expr, $op:tt) => {{
-        if !$crate::value::Value::is_number(&$vm.peek(0)) || !$crate::value::Value::is_number(&$vm.peek(1)) {
-            $vm.runtime_error("Operands must be numbers.");
-            return Err($crate::vm::InterpretResult::RuntimeError);
-        }
-        let b = $crate::value::Value::as_number(&$vm.pop());
-        let a = $crate::value::Value::as_number(&$vm.pop());
-        let result = $value_type(a $op b);
-        $vm.push(result);
-    }};
-}
-
 const FRAMES_MAX: usize = 64;
 const STACK_MAX: usize = FRAMES_MAX * (u8::MAX as usize + 1);
 
@@ -63,6 +50,12 @@ pub struct VM {
     // this is bad news for the VM, but fortunately rare since the gray stack tends to be pretty small
     // TODO(aalhendi): do something more graceful
     pub gray_stack: *mut *mut Obj,
+}
+
+/// Enum to control the execution flow of the interpreter loop.
+enum LoopControl {
+    Continue,
+    Stop,
 }
 
 impl VM {
@@ -109,49 +102,10 @@ impl VM {
     }
 
     pub fn run(&mut self) -> Result<(), InterpretResult> {
+        // Store frame pointer in local variable to avoid repeated memory loads
         let mut frame = self.get_frame();
-
-        macro_rules! READ_BYTE {
-            () => {{
-                #[allow(unused_unsafe)]
-                unsafe {
-                    let byte = *(*frame).ip;
-                    (*frame).ip = (*frame).ip.offset(1);
-                    byte
-                }
-            }};
-        }
-
-        macro_rules! READ_SHORT {
-            () => {{
-                unsafe {
-                    let short = {
-                        let bytes = std::slice::from_raw_parts((*frame).ip, 2);
-                        ((bytes[0] as u16) << 8) | (bytes[1] as u16)
-                    };
-                    (*frame).ip = (*frame).ip.offset(2);
-                    short
-                }
-            }};
-        }
-
-        macro_rules! READ_CONSTANT {
-            () => {{
-                let constant_index = READ_BYTE!() as usize;
-                #[allow(unused_unsafe)]
-                unsafe {
-                    *(*(*(*frame).closure).function)
-                        .chunk
-                        .constants
-                        .values
-                        .wrapping_add(constant_index)
-                }
-            }};
-        }
-
-        macro_rules! READ_STRING {
-            () => {{ READ_CONSTANT!().as_string() }};
-        }
+        // Keep IP in local variable to avoid memory traffic - this is critical for performance
+        let mut ip = unsafe { (*frame).ip };
 
         loop {
             #[cfg(feature = "debug-trace-execution")]
@@ -166,8 +120,7 @@ impl VM {
                 println!(); // newline
                 let offset = unsafe {
                     let chunk_code_ptr = (*(*(*frame).closure).function).chunk.code;
-                    let ip_ptr = (*frame).ip;
-                    ip_ptr.offset_from(chunk_code_ptr) as i32
+                    ip.offset_from(chunk_code_ptr) as i32
                 };
                 unsafe {
                     (*(*(*frame).closure).function)
@@ -176,251 +129,54 @@ impl VM {
                 }
             }
 
-            let instruction = OpCode::from(READ_BYTE!());
-            match instruction {
-                OpCode::Print => {
-                    println!("{}", self.pop());
-                }
-                OpCode::Jump => {
-                    let offset = READ_SHORT!();
-                    unsafe {
-                        (*frame).ip = (*frame).ip.wrapping_offset(offset as isize);
-                    }
-                }
-                OpCode::JumpIfFalse => {
-                    let offset = READ_SHORT!();
-                    if self.peek(0).is_falsey() {
-                        unsafe {
-                            (*frame).ip = (*frame).ip.wrapping_offset(offset as isize);
-                        }
-                    }
-                }
-                OpCode::Loop => {
-                    let offset = READ_SHORT!();
-                    unsafe {
-                        (*frame).ip = (*frame).ip.wrapping_offset(-(offset as isize));
-                    }
-                }
-                OpCode::Call => {
-                    let arg_count = READ_BYTE!();
-                    let value = self.peek(arg_count as i32);
-                    if !self.call_value(value, arg_count as i32) {
-                        return Err(InterpretResult::RuntimeError);
-                    }
-                    frame = self.get_frame();
-                }
-                OpCode::Invoke => {
-                    let method = READ_STRING!();
-                    let arg_count = READ_BYTE!() as i32;
-                    if !self.invoke(method, arg_count) {
-                        return Err(InterpretResult::RuntimeError);
-                    }
-                    frame = self.get_frame();
-                }
-                OpCode::SuperInvoke => {
-                    let method = READ_STRING!();
-                    let arg_count = READ_BYTE!() as i32;
-                    let superclass = self.pop().as_class();
-                    if !self.invoke_from_class(superclass, method, arg_count) {
-                        return Err(InterpretResult::RuntimeError);
-                    }
-                    frame = self.get_frame();
-                }
-                OpCode::Closure => {
-                    let function = READ_CONSTANT!().as_function();
-                    let closure = ObjClosure::new(function);
-                    self.push(Value::obj_val(closure));
-                    for i in 0..unsafe { (*closure).upvalue_count } {
-                        let is_local = READ_BYTE!();
-                        let index = READ_BYTE!();
-                        if is_local != 0 {
-                            unsafe {
-                                let local = (*frame).slots.wrapping_offset(index as isize);
-                                *(*closure).upvalues.wrapping_add(i as usize) =
-                                    self.capture_upvalue(local);
-                            }
-                        } else {
-                            unsafe {
-                                *(*closure).upvalues.wrapping_add(i as usize) =
-                                    *(*(*frame).closure).upvalues.wrapping_offset(index as isize);
-                            }
-                        }
-                    }
-                }
-                OpCode::CloseUpvalue => {
-                    self.close_upvalues(self.stack_top.wrapping_sub(1));
-                    self.pop();
-                }
-                OpCode::Return => {
-                    let result = self.pop();
-                    self.close_upvalues(unsafe { (*frame).slots });
-                    self.frame_count -= 1;
-                    if self.frame_count == 0 {
-                        self.pop();
-                        return Ok(());
-                    }
+            let instruction = OpCode::from(self.read_byte(&mut ip));
+            let result = match instruction {
+                OpCode::Print => self.op_print(),
+                OpCode::Jump => self.op_jump(&mut ip),
+                OpCode::JumpIfFalse => self.op_jump_if_false(&mut ip),
+                OpCode::Loop => self.op_loop(&mut ip),
+                OpCode::Call => self.op_call(&mut ip, &mut frame),
+                OpCode::Invoke => self.op_invoke(&mut ip, &mut frame),
+                OpCode::SuperInvoke => self.op_super_invoke(&mut ip, &mut frame),
+                OpCode::Closure => self.op_closure(&mut ip, frame),
+                OpCode::CloseUpvalue => self.op_close_upvalue(),
+                OpCode::Return => self.op_return(&mut frame, &mut ip),
+                OpCode::Constant => self.op_constant(&mut ip, frame),
+                OpCode::Negate => self.op_negate(&ip, frame),
+                OpCode::Add => self.op_add(&ip, frame),
+                OpCode::Subtract => self.op_binary(&ip, frame, |a, b| Value::number_val(a - b)),
+                OpCode::Multiply => self.op_binary(&ip, frame, |a, b| Value::number_val(a * b)),
+                OpCode::Divide => self.op_binary(&ip, frame, |a, b| Value::number_val(a / b)),
+                OpCode::Not => self.op_not(),
+                OpCode::Nil => self.op_nil(),
+                OpCode::True => self.op_true(),
+                OpCode::False => self.op_false(),
+                OpCode::Pop => self.op_pop(),
+                OpCode::GetLocal => self.op_get_local(&mut ip, frame),
+                OpCode::SetLocal => self.op_set_local(&mut ip, frame),
+                OpCode::GetGlobal => self.op_get_global(&mut ip, frame),
+                OpCode::DefineGlobal => self.op_define_global(&mut ip, frame),
+                OpCode::SetGlobal => self.op_set_global(&mut ip, frame),
+                OpCode::GetUpvalue => self.op_get_upvalue(&mut ip, frame),
+                OpCode::SetUpvalue => self.op_set_upvalue(&mut ip, frame),
+                OpCode::GetProperty => self.op_get_property(&mut ip, frame),
+                OpCode::SetProperty => self.op_set_property(&mut ip, frame),
+                OpCode::GetSuper => self.op_get_super(&mut ip, frame),
+                OpCode::Equal => self.op_equal(),
+                OpCode::Greater => self.op_binary(&ip, frame, |a, b| Value::bool_val(a > b)),
+                OpCode::Less => self.op_binary(&ip, frame, |a, b| Value::bool_val(a < b)),
+                OpCode::Class => self.op_class(&mut ip, frame),
+                OpCode::Inherit => self.op_inherit(&ip, frame),
+                OpCode::Method => self.op_method(&mut ip, frame),
+            };
 
-                    self.stack_top = unsafe { (*frame).slots };
-                    frame = self.get_frame();
-                    self.push(result);
-                }
-                OpCode::Constant => {
-                    let constant = READ_CONSTANT!();
-                    self.push(constant);
-                }
-                OpCode::Negate => {
-                    if !self.peek(0).is_number() {
-                        self.runtime_error("Operand must be a number.");
-                        return Err(InterpretResult::RuntimeError);
-                    }
-                    let v = Value::number_val(-self.pop().as_number());
-                    self.push(v);
-                }
-                OpCode::Nil => self.push(Value::nil_val()),
-                OpCode::True => self.push(Value::bool_val(true)),
-                OpCode::False => self.push(Value::bool_val(false)),
-                OpCode::Pop => {
-                    self.pop();
-                }
-                OpCode::GetLocal => {
-                    let slot = READ_BYTE!();
-                    let val = unsafe { *(*frame).slots.wrapping_offset(slot as isize) };
-                    self.push(val);
-                }
-                OpCode::SetLocal => {
-                    let slot = READ_BYTE!();
-                    unsafe {
-                        *(*frame).slots.wrapping_offset(slot as isize) = self.peek(0);
-                    }
-                }
-                OpCode::GetGlobal => {
-                    let name = READ_STRING!();
-                    if let Some(value) = self.globals.get(name) {
-                        self.push(value);
-                    } else {
-                        unsafe {
-                            let name_deref = &*name;
-                            self.runtime_error(&format!("Undefined variable '{name_deref}'."));
-                            return Err(InterpretResult::RuntimeError);
-                        }
-                    }
-                }
-                OpCode::DefineGlobal => {
-                    let name = READ_STRING!();
-                    self.globals.set(name, self.peek(0));
-                    self.pop();
-                }
-                OpCode::SetGlobal => {
-                    let name = READ_STRING!();
-
-                    if self.globals.set(name, self.peek(0)) {
-                        self.globals.delete(name);
-                        unsafe {
-                            let name_deref = &*name;
-                            self.runtime_error(&format!("Undefined variable '{name_deref}'."));
-                            return Err(InterpretResult::RuntimeError);
-                        }
-                    }
-                }
-                OpCode::GetUpvalue => {
-                    let slot = READ_BYTE!();
-                    let v = unsafe {
-                        *(*(*(*(*frame).closure).upvalues.wrapping_offset(slot as isize))).location
-                    };
-                    self.push(v);
-                }
-                OpCode::SetUpvalue => {
-                    let slot = READ_BYTE!();
-                    unsafe {
-                        *(*(*(*(*frame).closure).upvalues.wrapping_offset(slot as isize)))
-                            .location = self.peek(0);
-                    }
-                }
-                OpCode::SetProperty => {
-                    if !self.peek(1).is_instance() {
-                        self.runtime_error("Only instances have fields.");
-                        return Err(InterpretResult::RuntimeError);
-                    }
-
-                    let instance = self.peek(1).as_instance();
-                    unsafe {
-                        (*instance).fields.set(READ_STRING!(), self.peek(0));
-                        let value = self.pop();
-                        self.pop();
-                        self.push(value);
-                    }
-                }
-                OpCode::GetProperty => {
-                    if !self.peek(0).is_instance() {
-                        self.runtime_error("Only instances have properties.");
-                        return Err(InterpretResult::RuntimeError);
-                    }
-                    let instance = self.peek(0).as_instance();
-                    let name = READ_STRING!();
-                    if let Some(value) = unsafe { (*instance).fields.get(name) } {
-                        self.pop(); // instance
-                        self.push(value);
-                    } else if !self.bind_method(unsafe { (*instance).class }, name) {
-                        return Err(InterpretResult::RuntimeError);
-                    }
-                }
-                OpCode::GetSuper => {
-                    let name = READ_STRING!();
-                    let superclass = self.pop().as_class();
-
-                    if !self.bind_method(superclass, name) {
-                        return Err(InterpretResult::RuntimeError);
-                    }
-                }
-                OpCode::Equal => {
-                    let b = self.pop();
-                    let a = self.pop();
-                    self.push(Value::bool_val(a == b));
-                }
-                OpCode::Greater => binary_op!(self, Value::bool_val, >),
-                OpCode::Less => binary_op!(self, Value::bool_val, <),
-                OpCode::Add => {
-                    if self.peek(0).is_string() && self.peek(1).is_string() {
-                        self.concatenate();
-                    } else if self.peek(0).is_number() && self.peek(1).is_number() {
-                        let b = self.pop().as_number();
-                        let a = self.pop().as_number();
-                        let v = Value::number_val(a + b);
-                        self.push(v);
-                    } else {
-                        self.runtime_error("Operands must be two numbers or two strings.");
-                        return Err(InterpretResult::RuntimeError);
-                    }
-                }
-                OpCode::Subtract => binary_op!(self, Value::number_val, -),
-                OpCode::Multiply => binary_op!(self, Value::number_val, *),
-                OpCode::Divide => binary_op!(self, Value::number_val, /),
-                OpCode::Not => {
-                    let v = Value::bool_val(self.pop().is_falsey());
-                    self.push(v);
-                }
-                OpCode::Class => {
-                    let v = Value::obj_val(ObjClass2::new(READ_STRING!()));
-                    self.push(v);
-                }
-                OpCode::Inherit => {
-                    let superclass = self.peek(1);
-                    if !superclass.is_class() {
-                        self.runtime_error("Superclass must be a class.");
-                        return Err(InterpretResult::RuntimeError);
-                    }
-                    let subclass = self.peek(0).as_class();
-                    unsafe {
-                        Table::add_all(
-                            &mut (*superclass.as_class()).methods,
-                            &mut (*subclass).methods,
-                        );
-                    }
-                    self.pop(); // Subclass
-                }
-                OpCode::Method => {
-                    let name = READ_STRING!();
-                    self.define_method(name);
+            match result {
+                Ok(LoopControl::Continue) => continue,
+                Ok(LoopControl::Stop) => return Ok(()),
+                Err(e) => {
+                    // Sync IP back to frame before exiting on error
+                    unsafe { (*frame).ip = ip };
+                    return Err(e);
                 }
             }
         }
@@ -440,6 +196,474 @@ impl VM {
 
         self.run()
     }
+
+    // --- Start of instruction helpers ---
+
+    #[inline(always)]
+    fn read_byte(&self, ip: &mut *mut u8) -> u8 {
+        unsafe {
+            let byte = **ip;
+            *ip = ip.offset(1);
+            byte
+        }
+    }
+
+    #[inline(always)]
+    fn read_short(&self, ip: &mut *mut u8) -> u16 {
+        unsafe {
+            let short = {
+                let bytes = std::slice::from_raw_parts(*ip, 2);
+                ((bytes[0] as u16) << 8) | (bytes[1] as u16)
+            };
+            *ip = ip.offset(2);
+            short
+        }
+    }
+
+    #[inline(always)]
+    fn read_constant(&self, ip: &mut *mut u8, frame: *mut CallFrame) -> Value {
+        let constant_index = self.read_byte(ip) as usize;
+        unsafe {
+            *(*(*(*frame).closure).function)
+                .chunk
+                .constants
+                .values
+                .wrapping_add(constant_index)
+        }
+    }
+
+    #[inline(always)]
+    fn read_string(&self, ip: &mut *mut u8, frame: *mut CallFrame) -> *mut ObjString {
+        self.read_constant(ip, frame).as_string()
+    }
+
+    fn op_print(&mut self) -> Result<LoopControl, InterpretResult> {
+        println!("{}", self.pop());
+        Ok(LoopControl::Continue)
+    }
+
+    fn op_jump(&mut self, ip: &mut *mut u8) -> Result<LoopControl, InterpretResult> {
+        let offset = self.read_short(ip);
+        *ip = ip.wrapping_offset(offset as isize);
+        Ok(LoopControl::Continue)
+    }
+
+    fn op_jump_if_false(&mut self, ip: &mut *mut u8) -> Result<LoopControl, InterpretResult> {
+        let offset = self.read_short(ip);
+        if self.peek(0).is_falsey() {
+            *ip = ip.wrapping_offset(offset as isize);
+        }
+        Ok(LoopControl::Continue)
+    }
+
+    fn op_loop(&mut self, ip: &mut *mut u8) -> Result<LoopControl, InterpretResult> {
+        let offset = self.read_short(ip);
+        *ip = ip.wrapping_offset(-(offset as isize));
+        Ok(LoopControl::Continue)
+    }
+
+    fn op_call(
+        &mut self,
+        ip: &mut *mut u8,
+        frame: &mut *mut CallFrame,
+    ) -> Result<LoopControl, InterpretResult> {
+        let arg_count = self.read_byte(ip);
+        let value = self.peek(arg_count as i32);
+        unsafe { (**frame).ip = *ip };
+        if !self.call_value(value, arg_count as i32) {
+            return Err(InterpretResult::RuntimeError);
+        }
+        *frame = self.get_frame();
+        *ip = unsafe { (**frame).ip };
+        Ok(LoopControl::Continue)
+    }
+
+    fn op_invoke(
+        &mut self,
+        ip: &mut *mut u8,
+        frame: *mut *mut CallFrame,
+    ) -> Result<LoopControl, InterpretResult> {
+        let method = self.read_string(ip, unsafe { *frame });
+        let arg_count = self.read_byte(ip) as i32;
+        unsafe { (**frame).ip = *ip };
+        if !self.invoke(method, arg_count) {
+            return Err(InterpretResult::RuntimeError);
+        }
+        unsafe { *frame = self.get_frame() };
+        *ip = unsafe { (**frame).ip };
+        Ok(LoopControl::Continue)
+    }
+
+    fn op_super_invoke(
+        &mut self,
+        ip: &mut *mut u8,
+        frame: *mut *mut CallFrame,
+    ) -> Result<LoopControl, InterpretResult> {
+        let method = self.read_string(ip, unsafe { *frame });
+        let arg_count = self.read_byte(ip) as i32;
+        let superclass = self.pop().as_class();
+        unsafe { (**frame).ip = *ip };
+        if !self.invoke_from_class(superclass, method, arg_count) {
+            return Err(InterpretResult::RuntimeError);
+        }
+        unsafe { *frame = self.get_frame() };
+        *ip = unsafe { (**frame).ip };
+        Ok(LoopControl::Continue)
+    }
+
+    fn op_closure(
+        &mut self,
+        ip: &mut *mut u8,
+        frame: *mut CallFrame,
+    ) -> Result<LoopControl, InterpretResult> {
+        let function = self.read_constant(ip, frame).as_function();
+        unsafe { (*frame).ip = *ip }; // Closure creation may trigger GC
+        let closure = ObjClosure::new(function);
+        self.push(Value::obj_val(closure));
+        for i in 0..unsafe { (*closure).upvalue_count } {
+            let is_local = self.read_byte(ip);
+            let index = self.read_byte(ip);
+            if is_local != 0 {
+                unsafe {
+                    let local = (*frame).slots.wrapping_offset(index as isize);
+                    *(*closure).upvalues.wrapping_add(i as usize) = self.capture_upvalue(local);
+                }
+            } else {
+                unsafe {
+                    *(*closure).upvalues.wrapping_add(i as usize) =
+                        *(*(*frame).closure).upvalues.wrapping_offset(index as isize);
+                }
+            }
+        }
+        Ok(LoopControl::Continue)
+    }
+
+    fn op_close_upvalue(&mut self) -> Result<LoopControl, InterpretResult> {
+        self.close_upvalues(self.stack_top.wrapping_sub(1));
+        self.pop();
+        Ok(LoopControl::Continue)
+    }
+
+    fn op_return(
+        &mut self,
+        frame: &mut *mut CallFrame,
+        ip: &mut *mut u8,
+    ) -> Result<LoopControl, InterpretResult> {
+        let result = self.pop();
+        self.close_upvalues(unsafe { (**frame).slots });
+        self.frame_count -= 1;
+        if self.frame_count == 0 {
+            self.pop();
+            return Ok(LoopControl::Stop);
+        }
+        self.stack_top = unsafe { (**frame).slots };
+        *frame = self.get_frame();
+        *ip = unsafe { (**frame).ip };
+        self.push(result);
+        Ok(LoopControl::Continue)
+    }
+
+    fn op_constant(
+        &mut self,
+        ip: &mut *mut u8,
+        frame: *mut CallFrame,
+    ) -> Result<LoopControl, InterpretResult> {
+        let constant = self.read_constant(ip, frame);
+        self.push(constant);
+        Ok(LoopControl::Continue)
+    }
+
+    fn op_negate(
+        &mut self,
+        ip: &*mut u8,
+        frame: *mut CallFrame,
+    ) -> Result<LoopControl, InterpretResult> {
+        if !self.peek(0).is_number() {
+            unsafe { (*frame).ip = *ip };
+            self.runtime_error("Operand must be a number.");
+            return Err(InterpretResult::RuntimeError);
+        }
+        let v = Value::number_val(-self.pop().as_number());
+        self.push(v);
+        Ok(LoopControl::Continue)
+    }
+
+    fn op_nil(&mut self) -> Result<LoopControl, InterpretResult> {
+        self.push(Value::nil_val());
+        Ok(LoopControl::Continue)
+    }
+
+    fn op_true(&mut self) -> Result<LoopControl, InterpretResult> {
+        self.push(Value::bool_val(true));
+        Ok(LoopControl::Continue)
+    }
+
+    fn op_false(&mut self) -> Result<LoopControl, InterpretResult> {
+        self.push(Value::bool_val(false));
+        Ok(LoopControl::Continue)
+    }
+
+    fn op_pop(&mut self) -> Result<LoopControl, InterpretResult> {
+        self.pop();
+        Ok(LoopControl::Continue)
+    }
+
+    fn op_get_local(
+        &mut self,
+        ip: &mut *mut u8,
+        frame: *mut CallFrame,
+    ) -> Result<LoopControl, InterpretResult> {
+        let slot = self.read_byte(ip);
+        let val = unsafe { *(*frame).slots.wrapping_offset(slot as isize) };
+        self.push(val);
+        Ok(LoopControl::Continue)
+    }
+
+    fn op_set_local(
+        &mut self,
+        ip: &mut *mut u8,
+        frame: *mut CallFrame,
+    ) -> Result<LoopControl, InterpretResult> {
+        let slot = self.read_byte(ip);
+        unsafe {
+            *(*frame).slots.wrapping_offset(slot as isize) = self.peek(0);
+        }
+        Ok(LoopControl::Continue)
+    }
+
+    fn op_get_global(
+        &mut self,
+        ip: &mut *mut u8,
+        frame: *mut CallFrame,
+    ) -> Result<LoopControl, InterpretResult> {
+        let name = self.read_string(ip, frame);
+        if let Some(value) = self.globals.get(name) {
+            self.push(value);
+        } else {
+            unsafe {
+                (*frame).ip = *ip;
+                let name_deref = &*name;
+                self.runtime_error(&format!("Undefined variable '{name_deref}'."));
+                return Err(InterpretResult::RuntimeError);
+            }
+        }
+        Ok(LoopControl::Continue)
+    }
+
+    fn op_define_global(
+        &mut self,
+        ip: &mut *mut u8,
+        frame: *mut CallFrame,
+    ) -> Result<LoopControl, InterpretResult> {
+        let name = self.read_string(ip, frame);
+        self.globals.set(name, self.peek(0));
+        self.pop();
+        Ok(LoopControl::Continue)
+    }
+
+    fn op_set_global(
+        &mut self,
+        ip: &mut *mut u8,
+        frame: *mut CallFrame,
+    ) -> Result<LoopControl, InterpretResult> {
+        let name = self.read_string(ip, frame);
+        if self.globals.set(name, self.peek(0)) {
+            self.globals.delete(name);
+            unsafe {
+                (*frame).ip = *ip;
+                let name_deref = &*name;
+                self.runtime_error(&format!("Undefined variable '{name_deref}'."));
+                return Err(InterpretResult::RuntimeError);
+            }
+        }
+        Ok(LoopControl::Continue)
+    }
+
+    fn op_get_upvalue(
+        &mut self,
+        ip: &mut *mut u8,
+        frame: *mut CallFrame,
+    ) -> Result<LoopControl, InterpretResult> {
+        let slot = self.read_byte(ip);
+        let v =
+            unsafe { *(*(*(*(*frame).closure).upvalues.wrapping_offset(slot as isize))).location };
+        self.push(v);
+        Ok(LoopControl::Continue)
+    }
+
+    fn op_set_upvalue(
+        &mut self,
+        ip: &mut *mut u8,
+        frame: *mut CallFrame,
+    ) -> Result<LoopControl, InterpretResult> {
+        let slot = self.read_byte(ip);
+        unsafe {
+            *(*(*(*(*frame).closure).upvalues.wrapping_offset(slot as isize))).location =
+                self.peek(0);
+        }
+        Ok(LoopControl::Continue)
+    }
+
+    fn op_set_property(
+        &mut self,
+        ip: &mut *mut u8,
+        frame: *mut CallFrame,
+    ) -> Result<LoopControl, InterpretResult> {
+        if !self.peek(1).is_instance() {
+            unsafe { (*frame).ip = *ip };
+            self.runtime_error("Only instances have fields.");
+            return Err(InterpretResult::RuntimeError);
+        }
+
+        let instance = self.peek(1).as_instance();
+        unsafe {
+            (*instance)
+                .fields
+                .set(self.read_string(ip, frame), self.peek(0));
+            let value = self.pop();
+            self.pop();
+            self.push(value);
+        }
+        Ok(LoopControl::Continue)
+    }
+
+    fn op_get_property(
+        &mut self,
+        ip: &mut *mut u8,
+        frame: *mut CallFrame,
+    ) -> Result<LoopControl, InterpretResult> {
+        if !self.peek(0).is_instance() {
+            unsafe { (*frame).ip = *ip };
+            self.runtime_error("Only instances have properties.");
+            return Err(InterpretResult::RuntimeError);
+        }
+        let instance = self.peek(0).as_instance();
+        let name = self.read_string(ip, frame);
+        if let Some(value) = unsafe { (*instance).fields.get(name) } {
+            self.pop(); // instance
+            self.push(value);
+        } else {
+            unsafe { (*frame).ip = *ip };
+            if !self.bind_method(unsafe { (*instance).class }, name) {
+                return Err(InterpretResult::RuntimeError);
+            }
+        }
+        Ok(LoopControl::Continue)
+    }
+
+    fn op_get_super(
+        &mut self,
+        ip: &mut *mut u8,
+        frame: *mut CallFrame,
+    ) -> Result<LoopControl, InterpretResult> {
+        let name = self.read_string(ip, frame);
+        let superclass = self.pop().as_class();
+        unsafe { (*frame).ip = *ip };
+        if !self.bind_method(superclass, name) {
+            return Err(InterpretResult::RuntimeError);
+        }
+        Ok(LoopControl::Continue)
+    }
+
+    fn op_equal(&mut self) -> Result<LoopControl, InterpretResult> {
+        let b = self.pop();
+        let a = self.pop();
+        self.push(Value::bool_val(a == b));
+        Ok(LoopControl::Continue)
+    }
+
+    fn op_add(
+        &mut self,
+        ip: &*mut u8,
+        frame: *mut CallFrame,
+    ) -> Result<LoopControl, InterpretResult> {
+        if self.peek(0).is_string() && self.peek(1).is_string() {
+            unsafe { (*frame).ip = *ip }; // Concatenation may trigger GC
+            self.concatenate();
+        } else if self.peek(0).is_number() && self.peek(1).is_number() {
+            let b = self.pop().as_number();
+            let a = self.pop().as_number();
+            self.push(Value::number_val(a + b));
+        } else {
+            unsafe { (*frame).ip = *ip };
+            self.runtime_error("Operands must be two numbers or two strings.");
+            return Err(InterpretResult::RuntimeError);
+        }
+        Ok(LoopControl::Continue)
+    }
+
+    #[inline(always)]
+    fn op_binary<F>(
+        &mut self,
+        ip: &*mut u8,
+        frame: *mut CallFrame,
+        op: F,
+    ) -> Result<LoopControl, InterpretResult>
+    where
+        F: FnOnce(f64, f64) -> Value,
+    {
+        if !self.peek(0).is_number() || !self.peek(1).is_number() {
+            unsafe { (*frame).ip = *ip };
+            self.runtime_error("Operands must be numbers.");
+            return Err(InterpretResult::RuntimeError);
+        }
+        let b = self.pop().as_number();
+        let a = self.pop().as_number();
+        self.push(op(a, b));
+        Ok(LoopControl::Continue)
+    }
+
+    fn op_not(&mut self) -> Result<LoopControl, InterpretResult> {
+        let v = Value::bool_val(self.pop().is_falsey());
+        self.push(v);
+        Ok(LoopControl::Continue)
+    }
+
+    fn op_class(
+        &mut self,
+        ip: &mut *mut u8,
+        frame: *mut CallFrame,
+    ) -> Result<LoopControl, InterpretResult> {
+        unsafe { (*frame).ip = *ip }; // Class creation may trigger GC
+        let class_name = self.read_string(ip, frame);
+        let class = ObjClass2::new(class_name);
+        self.push(Value::obj_val(class));
+        Ok(LoopControl::Continue)
+    }
+
+    fn op_inherit(
+        &mut self,
+        ip: &*mut u8,
+        frame: *mut CallFrame,
+    ) -> Result<LoopControl, InterpretResult> {
+        let superclass = self.peek(1);
+        if !superclass.is_class() {
+            unsafe { (*frame).ip = *ip };
+            self.runtime_error("Superclass must be a class.");
+            return Err(InterpretResult::RuntimeError);
+        }
+        let subclass = self.peek(0).as_class();
+        unsafe {
+            Table::add_all(
+                &mut (*superclass.as_class()).methods,
+                &mut (*subclass).methods,
+            );
+        }
+        self.pop(); // Subclass
+        Ok(LoopControl::Continue)
+    }
+
+    fn op_method(
+        &mut self,
+        ip: &mut *mut u8,
+        frame: *mut CallFrame,
+    ) -> Result<LoopControl, InterpretResult> {
+        let name = self.read_string(ip, frame);
+        self.define_method(name);
+        Ok(LoopControl::Continue)
+    }
+
+    // --- End of instruction helpers ---
 
     fn concatenate(&mut self) {
         let b = self.peek(0).as_string();

@@ -1,11 +1,11 @@
 use crate::{
+    CURRENT,
     chunk::{Chunk, OpCode},
     compiler::{ClassCompiler, Compiler, FunctionType},
     object::{Obj, ObjFunction},
     scanner::Scanner,
     token::{Token, TokenType},
     value::Value,
-    CURRENT,
 };
 
 #[derive(Debug, PartialEq, PartialOrd, Clone, Copy)]

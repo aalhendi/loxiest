@@ -5,7 +5,7 @@ use crate::chunk::Chunk;
 use crate::memory::reallocate;
 use crate::table::Table;
 use crate::value::Value;
-use crate::{vm, ALLOCATE, FREE_ARRAY};
+use crate::{ALLOCATE, FREE_ARRAY, vm};
 
 macro_rules! ALLOCATE_OBJ {
     ($type_:ty, $object_type:expr) => {

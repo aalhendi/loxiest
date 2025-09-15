@@ -1,9 +1,9 @@
 use crate::{
+    CURRENT,
     memory::mark_object,
     object::{Obj, ObjFunction},
     parser::Parser,
     token::{Token, TokenType},
-    CURRENT,
 };
 
 #[derive(PartialEq, Clone)]
